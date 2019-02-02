@@ -9,6 +9,7 @@ import random
 import numpy as np
 import os
 import pickle
+import time
 
 if __name__ == '__main__':
     parser = OptionParser()
@@ -132,6 +133,7 @@ if __name__ == '__main__':
             #     print "finish one sub-batch with size of " + str(len(one_sub_batch)) + " with length of " + str(
             #         len(sub_batch_words[0]))
             #     # batch_likelihood += sub_batch_likelihood
+            print "the length of sentences in this batch is "+ str(len(one_batch[0][0]))
             batch_words, batch_pos, batch_parent, batch_sen = [s[0] for s in one_batch], [s[1] for s in one_batch], [
                 s[2] for s in one_batch], [s[3][0] for s in one_batch]
             batch_words_v = torch.LongTensor(batch_words)
@@ -140,9 +142,12 @@ if __name__ == '__main__':
             batch_loss = high_order_dep_model(batch_words_v, batch_pos_v, batch_parent_v, batch_sen)
             #batch_loss = torch.stack(batch_loss_list)
             #batch_loss = torch.sum(batch_loss)
+            start = time.clock()
             batch_loss.backward()
             high_order_dep_model.trainer.step()
             high_order_dep_model.trainer.zero_grad()
+            elasped = time.clock() - start
+            print "time cost in optimization " + str(elasped)
             iter_loss += batch_loss.cpu()
         iter_loss /= tot_batch
         print ' loss for this iteration ', str(iter_loss.detach().data.numpy())

@@ -355,6 +355,7 @@ def m1_constituent_index(sentence_length, multiroot):
     basic_span = []
     id_2_span = {}
     id_2_sib = {}
+    view_spans = []
     for grand_idx in range(sentence_length):
         for left_idx in range(sentence_length):
             for right_idx in range(left_idx, sentence_length):
@@ -363,11 +364,14 @@ def m1_constituent_index(sentence_length, multiroot):
                     if grand_idx < left_idx or grand_idx > right_idx or (
                                         grand_idx == left_idx and left_idx == 0 and dir == 1):
                         id_2_span[counter_id] = (grand_idx, left_idx, right_idx, dir)
-                        id_2_sib[counter_id] = sibling_candidates
+                        if dir == 0:
+                            id_2_sib[counter_id] = sibling_candidates[0:len(sibling_candidates) - 1]
+                        else:
+                            id_2_sib[counter_id] = sibling_candidates[1:]
                         counter_id += 1
 
     span_2_id = {s: id for id, s in id_2_span.items()}
-
+    basic_span.append(span_2_id.get((0, 0, 0, 1)))
     for i in range(sentence_length):
         for j in range(sentence_length):
             if j != 0 and i != j:
@@ -393,9 +397,9 @@ def m1_constituent_index(sentence_length, multiroot):
     imjics = [[] for _ in range(counter_id)]
 
     for l in range(1, sentence_length):
-        for k in range(sentence_length):
-            for i in range(sentence_length - l):
-                j = i + l
+        for i in range(sentence_length - l):
+            j = i + l
+            for k in range(sentence_length):
                 for dir in range(2):
                     if k < i or k > j or (k == i and i == 0 and dir == 1):
                         ids = span_2_id[(k, i, j, dir)]
@@ -413,17 +417,17 @@ def m1_constituent_index(sentence_length, multiroot):
                                     jimcs[ids].append(idlc)
                                     idri = span_2_id[(k, m, j, dir)]
                                     kmjcs[ids].append(idri)
-                                    if m > i and m < (j - 1):
+                                    if m > i and m < j:
                                         # one incomplete span,one sibling span to form an incomplete span
                                         idlsib = span_2_id[(j, i, m, dir)]
                                         jimis[ids].append(idlsib)
                                         idri = span_2_id[(k, m, j, dir)]
                                         kmjis[ids].append(idri)
-                                    elif m == j - 1:
+                                    if m == j - 1:
                                         # two complete spans to form an incomplete span
                                         idlc = span_2_id[(j, i, m, dir + 1)]
                                         jimics[ids].append(idlc)
-                                        idrc = span_2_id[(k, m, j, dir)]
+                                        idrc = span_2_id[(k, m + 1, j, dir)]
                                         kmjics[ids].append(idrc)
                             else:
                                 if m < j:
@@ -452,6 +456,7 @@ def m1_constituent_index(sentence_length, multiroot):
                                     imjics[ids].append(idrc)
 
                         ijkss.append(ids)
+                        view_spans.append((k, i, j, dir))
 
     return span_2_id, id_2_span, ijkss, jimcs, kmjcs, jimis, kmjis, jimics, kmjics, kimsib, kmjsib, \
-           kimcs, imjcs, kimis, imjis, kimics, imjics, basic_span,id_2_sib
+           kimcs, imjcs, kimis, imjis, kimics, imjics, basic_span, id_2_sib

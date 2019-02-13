@@ -36,23 +36,14 @@ class dep_model(nn.Module):
         self.hidden2sibling = nn.Linear(2 * self.hidden_dim, self.feature_dim)
         self.hidden2grand = nn.Linear(2 * self.hidden_dim, self.feature_dim)
 
-        # self.sibling_preout = nn.Linear(3 * self.feature_dim, self.pre_output)
-        # self.grand_preout = nn.Linear(3 * self.feature_dim, self.pre_output)
-        # self.root_preout = nn.Linear(2 * self.feature_dim, self.pre_output)
-        self.ghms_preout = nn.Linear(4 * self.feature_dim, self.pre_output)
-
-        self.sibling_out = nn.Linear(self.pre_output, 1)
-        self.grand_out = nn.Linear(self.pre_output, 1)
-        self.ghms_out = nn.Linear(self.pre_output, 1)
-
+        self.sibling_out = nn.Linear(self.feature_dim, 1)
+        self.grand_out = nn.Linear(self.feature_dim, 1)
+        self.head_out = nn.Linear(self.feature_dim, 1)
+        self.modifier_out = nn.Linear(self.feature_dim, 1)
         self.plookup = nn.Embedding(len(pos), self.pdim)
         self.wlookup = nn.Embedding(len(self.words), self.embedding_dim)
 
         self.trainer = self.get_optim(self.parameters())
-
-        self.tree_param = {}
-        self.partition_table = {}
-        self.encoder_score_table = {}
         self.parse_results = {}
 
     def get_optim(self, parameters):
@@ -67,49 +58,23 @@ class dep_model(nn.Module):
 
     def evaluate_m1(self, hidden_out):
         batch_size, sentence_length = hidden_out.data.shape[0], hidden_out.data.shape[1]
-        ghms_scores = torch.zeros((batch_size, sentence_length, sentence_length, sentence_length, sentence_length),
-                                  dtype=torch.float)
-        if self.gpu > -1 and torch.cuda.is_available():
-            ghms_scores = ghms_scores.cuda()
-        # ghms_scores.fill_(-np.inf)
         grand_score = self.hidden2grand(hidden_out)
-        grand_score = self.feature_transform(grand_score, 0, 3)
+        grand_score = self.grand_out(grand_score)
+        grand_score = self.feature_transform(grand_score, 2, 3)
         head_score = self.hidden2head(hidden_out)
+        head_score = self.head_out(head_score)
         head_score = self.feature_transform(head_score, 1, 3)
         modifier_score = self.hidden2modifier(hidden_out)
-        modifier_score = self.feature_transform(modifier_score, 2, 3)
+        modifier_score = self.modifier_out(modifier_score)
+        modifier_score = self.feature_transform(modifier_score, 3, 3)
         sibling_score = self.hidden2sibling(hidden_out)
-        sibling_score = self.feature_transform(sibling_score, 3, 3)
-        ghms_scores_table = self.ghms_preout(
-            F.tanh(torch.cat((grand_score, head_score, modifier_score, sibling_score), 2)))
-        ghms_scores_table = F.tanh(self.ghms_out(ghms_scores_table))
-        ghms_scores_table = ghms_scores_table.view(batch_size, pow(sentence_length, 4))
-        start = time.clock()
-        for i in range(sentence_length):
-            for j in range(sentence_length):
-                if j == 0:
-                    continue
-                if i == j:
-                    continue
-                left = i if j > i else j
-                right = j if j > i else i
-                for k in range(sentence_length):
-                    if left < k < right:
-                        continue
-                    for m in range(left, right + 1):
-                        # one_grand_rep = grand_score[:, k]
-                        # one_head_rep = head_score[:, i]
-                        # one_modifier_rep = modifier_score[:, j]
-                        # one_sibling_rep = sibling_score[:, m]
-                        # one_ghms_score = self.ghms_preout(
-                        # F.tanh(torch.cat((one_grand_rep, one_head_rep, one_modifier_rep, one_sibling_rep), 1)))
-                        # one_ghms_score = F.tanh(self.ghms_out(one_ghms_score))
-                        score_index = m * pow(sentence_length, 3) + i * pow(sentence_length,
-                                                                            2) + j * sentence_length + k
-                        ghms_scores[:, j, k, i, m] = ghms_scores_table[:, score_index]
-        elasped = time.clock() - start
-        print "time cost in iteration " + str(elasped)
-        return ghms_scores
+        sibling_score = self.sibling_out(sibling_score)
+        sibling_score = self.feature_transform(sibling_score, 0, 3)
+        ghms_scores = torch.sum(torch.cat((grand_score, head_score, modifier_score, sibling_score), 2), dim=2)
+        ghms_scores = torch.tanh(ghms_scores)
+        ghms_scores_table = ghms_scores.view(batch_size, sentence_length, sentence_length, sentence_length,
+                                             sentence_length)
+        return ghms_scores_table
 
     def check_gold(self, batch_parent):
         batch_size, sentence_length = batch_parent.shape
@@ -178,22 +143,29 @@ class dep_model(nn.Module):
             ghms_scores = self.evaluate_m1(hidden_out)
             elasped = time.clock() - start
             print "time cost in computing score " + str(elasped)
+            if self.training:
+                start = time.clock()
+                g_heads_grand_sibling, g_heads = self.check_gold(batch_parent)
+                elasped = time.clock() - start
+                print "time cost in finding gold " + str(elasped)
+            else:
+                g_heads_grand_sibling = None
             start = time.clock()
-            g_heads_grand_sibling, g_heads = self.check_gold(batch_parent)
-            elasped = time.clock() - start
-            print "time cost in finding gold " + str(elasped)
-            start = time.clock()
-            heads_grand_sibling, heads = EL_M1.batch_parse(ghms_scores, g_heads_grand_sibling, self.gpu)
-            #heads_grand_sibling = torch.ones((batch_size, pow(sentence_length,4)), dtype=torch.long)
-            #g_heads_grand_sibling = 2 * torch.ones((batch_size, pow(sentence_length,4)), dtype=torch.long)
+            heads_grand_sibling, heads = EL_M1.batch_parse(ghms_scores.cpu(), g_heads_grand_sibling, self.training,
+                                                           self.gpu)
+            if not self.training:
+                for i in range(batch_size):
+                    sen_idx = batch_sen[i]
+                    self.parse_results[sen_idx] = heads[i]
+                return
             elasped = time.clock() - start
             print "time cost in parsing " + str(elasped)
             # print(heads)
             batch_base = torch.zeros((batch_size, sentence_length), dtype=torch.long)
             if self.gpu > -1 and torch.cuda.is_available():
-                 heads_grand_sibling = heads_grand_sibling.cuda()
-                 g_heads_grand_sibling = g_heads_grand_sibling.cuda()
-                 batch_base = batch_base.cuda()
+                heads_grand_sibling = heads_grand_sibling.cuda()
+                g_heads_grand_sibling = g_heads_grand_sibling.cuda()
+                batch_base = batch_base.cuda()
             batch_margin = torch.ne((g_heads_grand_sibling - heads_grand_sibling), batch_base).type(torch.float)
             if self.gpu > -1 and torch.cuda.is_available():
                 batch_margin = batch_margin.cuda()

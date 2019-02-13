@@ -3,7 +3,7 @@ import utils
 import numpy as np
 
 
-def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
+def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
     batch_size, sentence_length, _, _, _ = batch_ghms_scores.shape
     # CYK table
     complete_table = torch.zeros((batch_size, sentence_length * sentence_length * sentence_length * 2),
@@ -12,10 +12,10 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
                                    dtype=torch.float)
     sibling_table = torch.zeros((batch_size, sentence_length * sentence_length * sentence_length * 2),
                                 dtype=torch.float)
-    if gpu > -1 and torch.cuda.is_available():
-        complete_table = complete_table.cuda()
-        incomplete_table = incomplete_table.cuda()
-        sibling_table = sibling_table.cuda()
+    # if gpu > -1 and torch.cuda.is_available():
+    #     complete_table = complete_table.cuda()
+    #     incomplete_table = incomplete_table.cuda()
+    #     sibling_table = sibling_table.cuda()
     complete_table.fill_(-np.inf)
     incomplete_table.fill_(-np.inf)
     sibling_table.fill_(-np.inf)
@@ -37,6 +37,7 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
     for ijk in ijkss:
         (k, i, j, dir) = id_2_span[ijk]
         if dir == 0:
+
             # construct incomplete spans
             num_jimc = len(jimics[ijk])
             if num_jimc > 0:
@@ -45,9 +46,13 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
                 base = torch.zeros((batch_size, 1), dtype=torch.long)
                 compare = torch.LongTensor([k * sentence_length * sentence_length + j * sentence_length + j])
                 compare = compare.repeat(batch_size, 1)
-                margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(torch.float)
-                if gpu > -1 and torch.cuda.is_available():
-                    margin = margin.cuda()
+                if training:
+                    margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(
+                        torch.float)
+                else:
+                    margin = torch.zeros((batch_size, num_jimc), dtype=torch.float)
+                # if gpu > -1 and torch.cuda.is_available():
+                #     margin = margin.cuda()
                 span_ci = jim_ci + kmj_ci + batch_ghms_scores[:, i, k, j, j].view(batch_size, 1) + margin
                 num_jim = len(jimis[ijk])
                 span_i = span_ci
@@ -59,14 +64,15 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
                     compare = torch.LongTensor(
                         [k * sentence_length * sentence_length + j * sentence_length]) + torch.LongTensor(sibs)
                     compare = compare.repeat(batch_size, 1)
-                    margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(
-                        torch.float)
-                    if gpu > -1 and torch.cuda.is_available():
-                        margin = margin.cuda()
+                    if training:
+                        margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(
+                            torch.float)
+                    else:
+                        margin = torch.zeros((batch_size, num_jim), dtype=torch.float)
+                    # if gpu > -1 and torch.cuda.is_available():
+                    #     margin = margin.cuda()
                     span_ii = jim_sibi + kmj_ii + batch_ghms_scores[:, i, k, j, sibs].view(batch_size, num_jim) + margin
                     span_i = torch.cat((span_ii, span_i), dim=1)
-                dist = j - i
-                max_span = torch.max(span_i, dim=1)[1]
                 incomplete_table[:, ijk] = torch.max(span_i, dim=1)[0]
                 incomplete_backtrack[:, ijk] = torch.max(span_i, dim=1)[1]
             # construct sibling spans
@@ -94,9 +100,13 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
                 base = torch.zeros((batch_size, 1), dtype=torch.long)
                 compare = torch.LongTensor([k * sentence_length * sentence_length + i * sentence_length + i])
                 compare = compare.repeat(batch_size, 1)
-                margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(torch.float)
-                if gpu > -1 and torch.cuda.is_available():
-                    margin = margin.cuda()
+                if training:
+                    margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
+                        torch.float)
+                else:
+                    margin = torch.zeros((batch_size, sentence_length), dtype=torch.float)
+                # if gpu > -1 and torch.cuda.is_available():
+                #     margin = margin.cuda()
                 span_ci = kim_ci + imj_ci + batch_ghms_scores[:, j, k, i, i].view(batch_size, 1) + margin
                 span_i = span_ci
                 num_jim = len(jimis[ijk])
@@ -108,10 +118,13 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, gpu):
                     compare = torch.LongTensor(
                         [k * sentence_length * sentence_length + i * sentence_length]) + torch.LongTensor(sibs)
                     compare = compare.repeat(batch_size, 1)
-                    margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
-                        torch.float)
-                    if gpu > -1 and torch.cuda.is_available():
-                        margin = margin.cuda()
+                    if training:
+                        margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
+                            torch.float)
+                    else:
+                        margin = torch.zeros((batch_size, sentence_length), dtype=torch.float)
+                    # if gpu > -1 and torch.cuda.is_available():
+                    #     margin = margin.cuda()
                     span_ii = kim_ii + imj_sibi + batch_ghms_scores[:, j, k, i, sibs].view(batch_size, num_jim) + margin
                     span_i = torch.cat((span_i, span_ii), dim=1)
                 max_span = torch.max(span_i, dim=1)[1]

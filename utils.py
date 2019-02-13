@@ -201,7 +201,7 @@ def read_data(conll_path, isPredict):
                 sentences.append(ds)
                 s_counter += 1
         wordsCount['<UNKNOWN>'] = 0
-        # posCount['<UNKNOWN-POS>'] = 0
+        posCount['<UNKNOWN-POS>'] = 0
         return {w: i for i, w in enumerate(wordsCount.keys())}, {p: i for i, p in enumerate(
             posCount.keys())}, sentences
     else:
@@ -224,6 +224,16 @@ def construct_batch_data(data_list, batch_size):
     return batch_data
 
 
+def construct_imbalanced_batch_data(data_list, batch_size):
+    data_list.sort(key=lambda x: len(x[0]))
+    grouped = [list(g) for k, g in groupby(data_list, lambda s: len(s[0]))]
+    batch_data = []
+    for group in grouped:
+        sub_batch_data = get_imbalanced_batch_data(group, batch_size)
+        batch_data.extend(sub_batch_data)
+    return batch_data
+
+
 def get_batch_data(grouped_data, batch_size):
     batch_data = []
     len_datas = len(grouped_data)
@@ -238,6 +248,29 @@ def get_batch_data(grouped_data, batch_size):
     return batch_data
 
 
+def get_imbalanced_batch_data(grouped_data, batch_size):
+    batch_data = []
+    sample = grouped_data[0][0]
+    actual_batch_size = batch_size
+    if 25 <= len(sample) < 30 and batch_size > 200:
+        actual_batch_size = 200
+    if 30 <= len(sample) < 35 and batch_size > 150:
+        actual_batch_size = 150
+    if 35 <= len(sample) < 38 and batch_size > 100:
+        actual_batch_size = 100
+    if len(sample)>=38 and batch_size > 80:
+        actual_batch_size = 80
+    len_datas = len(grouped_data)
+    num_batch = len_datas // actual_batch_size
+    if not len_datas % actual_batch_size == 0:
+        num_batch += 1
+    for i in range(num_batch):
+        start_idx = i * actual_batch_size
+        end_idx = min(len_datas, (i + 1) * actual_batch_size)
+        batch_data.append(grouped_data[start_idx:end_idx])
+    return batch_data
+
+
 def get_index(b, id):
     id_a = id // b
     id_b = id % b
@@ -248,7 +281,7 @@ def eval(predicted, gold, test_path, log_path, epoch):
     correct_counter = 0
     total_counter = 0
     for s in range(len(gold)):
-        ps = predicted[s][0]
+        ps = predicted[s]
         gs = gold[s]
         for i, e in enumerate(gs.entries):
             if i == 0:
@@ -269,11 +302,11 @@ def eval(predicted, gold, test_path, log_path, epoch):
         for i in range(len(sentence.entries)):
             f_w.write(str(sentence.entries[i].parent_id) + ' ')
         f_w.write('\n')
+        # for i in range(len(sentence.entries)):
+        #     f_w.write(str(int(predicted[s][1][i])) + ' ')
+        # f_w.write('\n')
         for i in range(len(sentence.entries)):
-            f_w.write(str(int(predicted[s][1][i])) + ' ')
-        f_w.write('\n')
-        for i in range(len(sentence.entries)):
-            f_w.write(str(int(predicted[s][0][i])) + ' ')
+            f_w.write(str(int(predicted[s][i])) + ' ')
         f_w.write('\n')
         f_w.write('\n')
     f_w.close()
@@ -334,10 +367,12 @@ def construct_data_list(sentences, words, pos):
     return data_list
 
 
-def construct_parsing_data_list(sentences, words, pos):
+def construct_parsing_data_list(sentences, words, pos, filter):
     data_list = list()
     sen_idx = 0
     for s in sentences:
+        if s.size > filter:
+            continue
         s_word, s_pos, s_parent = s.set_parsing_data_list(words, pos)
         s_data_list = list()
         s_data_list.append(s_word)

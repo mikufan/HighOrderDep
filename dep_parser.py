@@ -31,7 +31,6 @@ if __name__ == '__main__':
     parser.add_option("--lr", type="float", dest="learning_rate", default=0.01)
     parser.add_option("--outdir", type="string", dest="output", default="output")
     parser.add_option("--sample_idx", type="int", dest="sample_idx", default=1000)
-    parser.add_option("--lstmdims", type="int", dest="lstm_dims", default=125)
     parser.add_option("--feature_dim", type="int", dest="feature_dim", default=25)
 
     parser.add_option("--dropout", type="float", dest="dropout_ratio", default=0.25)
@@ -62,24 +61,20 @@ if __name__ == '__main__':
         dep_model.eval()
         eval_data_list = utils.construct_parsing_data_list(eval_sentences, w2i, pos, options.length_filter)
         devpath = os.path.join(options.output, 'test_pred' + str(epoch + 1) + '_' + str(options.sample_idx))
-        # for s in eval_sentences:
-        #     s_word, s_pos = s.set_data_list(w2i, pos)
-        #     s_data_list = list()
-        #     s_data_list.append(s_word)
-        #     s_data_list.append(s_pos)
-        #     s_data_list.append([eval_sen_idx])
-        #     eval_data_list.append(s_data_list)
-        #     eval_sen_idx += 1
         eval_batch_data = utils.construct_batch_data(eval_data_list, options.batchsize)
 
-        for batch_id, one_batch in enumerate(eval_batch_data):
+        for batch_id, one_batch in tqdm(enumerate(eval_batch_data), mininterval=2,
+                                        desc=' -Tot it %d (epoch %d)' % (len(eval_batch_data), 0), leave=False, file=sys.stdout):
             eval_batch_words, eval_batch_pos, eval_batch_sen = [s[0] for s in one_batch], [s[1] for s in one_batch], \
                                                                [s[3][0] for s in one_batch]
             eval_batch_words_v = torch.LongTensor(eval_batch_words)
             eval_batch_pos_v = torch.LongTensor(eval_batch_pos)
             dep_model(eval_batch_words_v, eval_batch_pos_v, None, eval_batch_sen)
+            del dep_model.ghms_scores_table
+            if options.gpu > -1 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
         test_res = dep_model.parse_results
-        utils.eval(test_res, eval_sentences, devpath, options.log + '_' + str(options.sample_idx), epoch)
+        utils.eval(test_res, eval_data_list, devpath, options.log + '_' + str(options.sample_idx), epoch)
         print "===================================="
 
 
@@ -113,26 +108,28 @@ if __name__ == '__main__':
             batch_loss_list = []
 
             #     # batch_likelihood += sub_batch_likelihood
-            print "the length of sentences in this batch is " + str(len(one_batch[0][0]))
+            #print "the length of sentences in this batch is " + str(len(one_batch[0][0]))
             batch_words, batch_pos, batch_parent, batch_sen = [s[0] for s in one_batch], [s[1] for s in one_batch], [
                 s[2] for s in one_batch], [s[3][0] for s in one_batch]
             batch_words_v = torch.LongTensor(batch_words)
             batch_pos_v = torch.LongTensor(batch_pos)
             batch_parent_v = torch.LongTensor(batch_parent)
             batch_loss = high_order_dep_model(batch_words_v, batch_pos_v, batch_parent_v, batch_sen)
-            start = time.clock()
+            #start = time.clock()
             batch_loss.backward()
             high_order_dep_model.trainer.step()
             high_order_dep_model.trainer.zero_grad()
-            elasped = time.clock() - start
-            print "time cost in optimization " + str(elasped)
+            #elasped = time.clock() - start
+            #print "time cost in optimization " + str(elasped)
+            del high_order_dep_model.ghms_scores_table
+            if options.gpu > -1 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
             iter_loss += batch_loss.cpu()
         iter_loss /= tot_batch
         print ' loss for this iteration ', str(iter_loss.detach().data.numpy())
-        if options.gpu >= 0 and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+
             # print 'likelihood for this iteration ', training_likelihood
-    if options.do_eval:
-        do_eval(high_order_dep_model, w2i, pos, options)
+        if options.do_eval:
+            do_eval(high_order_dep_model, w2i, pos, options)
 
 print 'Training finished'

@@ -50,7 +50,7 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
                     margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(
                         torch.float)
                 else:
-                    margin = torch.zeros((batch_size, num_jimc), dtype=torch.float)
+                    margin = torch.zeros((batch_size, 1), dtype=torch.float)
                 # if gpu > -1 and torch.cuda.is_available():
                 #     margin = margin.cuda()
                 span_ci = jim_ci + kmj_ci + batch_ghms_scores[:, i, k, j, j].view(batch_size, 1) + margin
@@ -104,7 +104,7 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
                     margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
                         torch.float)
                 else:
-                    margin = torch.zeros((batch_size, sentence_length), dtype=torch.float)
+                    margin = torch.zeros((batch_size, 1), dtype=torch.float)
                 # if gpu > -1 and torch.cuda.is_available():
                 #     margin = margin.cuda()
                 span_ci = kim_ci + imj_ci + batch_ghms_scores[:, j, k, i, i].view(batch_size, 1) + margin
@@ -122,7 +122,7 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
                         margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
                             torch.float)
                     else:
-                        margin = torch.zeros((batch_size, sentence_length), dtype=torch.float)
+                        margin = torch.zeros((batch_size, num_jim), dtype=torch.float)
                     # if gpu > -1 and torch.cuda.is_available():
                     #     margin = margin.cuda()
                     span_ii = kim_ii + imj_sibi + batch_ghms_scores[:, j, k, i, sibs].view(batch_size, num_jim) + margin

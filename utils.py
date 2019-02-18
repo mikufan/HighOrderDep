@@ -281,35 +281,36 @@ def eval(predicted, gold, test_path, log_path, epoch):
     correct_counter = 0
     total_counter = 0
     for s in range(len(gold)):
-        ps = predicted[s]
-        gs = gold[s]
-        for i, e in enumerate(gs.entries):
+        sen_idx = gold[s][3][0]
+        ps = predicted[sen_idx]
+        gs = gold[s][2]
+        for i, e in enumerate(gs):
             if i == 0:
                 continue
-            if ps[i] == e.parent_id:
+            if ps[i] == gs[i]:
                 correct_counter += 1
             total_counter += 1
     accuracy = float(correct_counter) / total_counter
     print 'UAS is ' + str(accuracy * 100) + '%'
-    f_w = open(test_path, 'w')
-    for s, sentence in enumerate(gold):
-        for entry in sentence.entries:
-            f_w.write(str(entry.norm) + ' ')
-        f_w.write('\n')
-        for entry in sentence.entries:
-            f_w.write(str(entry.pos) + ' ')
-        f_w.write('\n')
-        for i in range(len(sentence.entries)):
-            f_w.write(str(sentence.entries[i].parent_id) + ' ')
-        f_w.write('\n')
-        # for i in range(len(sentence.entries)):
-        #     f_w.write(str(int(predicted[s][1][i])) + ' ')
-        # f_w.write('\n')
-        for i in range(len(sentence.entries)):
-            f_w.write(str(int(predicted[s][i])) + ' ')
-        f_w.write('\n')
-        f_w.write('\n')
-    f_w.close()
+    # f_w = open(test_path, 'w')
+    # for s, sentence in enumerate(gold):
+    #     for entry in sentence.entries:
+    #         f_w.write(str(entry.norm) + ' ')
+    #     f_w.write('\n')
+    #     for entry in sentence.entries:
+    #         f_w.write(str(entry.pos) + ' ')
+    #     f_w.write('\n')
+    #     for i in range(len(sentence.entries)):
+    #         f_w.write(str(sentence.entries[i].parent_id) + ' ')
+    #     f_w.write('\n')
+    #     # for i in range(len(sentence.entries)):
+    #     #     f_w.write(str(int(predicted[s][1][i])) + ' ')
+    #     # f_w.write('\n')
+    #     for i in range(len(sentence.entries)):
+    #         f_w.write(str(int(predicted[s][i])) + ' ')
+    #     f_w.write('\n')
+    #     f_w.write('\n')
+    # f_w.close()
     if epoch == 0:
         log = open(log_path, 'w')
         # log.write("UAS for epoch " + str(epoch))

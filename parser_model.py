@@ -42,9 +42,10 @@ class dep_model(nn.Module):
         self.modifier_out = nn.Linear(self.feature_dim, 1)
         self.plookup = nn.Embedding(len(pos), self.pdim)
         self.wlookup = nn.Embedding(len(self.words), self.embedding_dim)
-
         self.trainer = self.get_optim(self.parameters())
         self.parse_results = {}
+
+        self.ghms_scores_table = None
 
     def get_optim(self, parameters):
         if self.optim == 'sgd':
@@ -70,11 +71,12 @@ class dep_model(nn.Module):
         sibling_score = self.hidden2sibling(hidden_out)
         sibling_score = self.sibling_out(sibling_score)
         sibling_score = self.feature_transform(sibling_score, 0, 3)
-        ghms_scores = torch.sum(torch.cat((grand_score, head_score, modifier_score, sibling_score), 2), dim=2)
-        ghms_scores = torch.tanh(ghms_scores)
-        ghms_scores_table = ghms_scores.view(batch_size, sentence_length, sentence_length, sentence_length,
-                                             sentence_length)
-        return ghms_scores_table
+        self.ghms_scores_table = torch.sum(torch.cat((grand_score, head_score, modifier_score, sibling_score), 2),
+                                           dim=2)
+        self.ghms_scores_table = torch.tanh(self.ghms_scores_table)
+        self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
+                                                             sentence_length, sentence_length)
+        return
 
     def check_gold(self, batch_parent):
         batch_size, sentence_length = batch_parent.shape
@@ -139,27 +141,27 @@ class dep_model(nn.Module):
         batch_input = torch.cat((w_embeds, p_embeds), 2)
         hidden_out, _ = self.lstm(batch_input)
         if self.order == 3:
-            start = time.clock()
-            ghms_scores = self.evaluate_m1(hidden_out)
-            elasped = time.clock() - start
-            print "time cost in computing score " + str(elasped)
+            # start = time.clock()
+            self.evaluate_m1(hidden_out)
+            # elasped = time.clock() - start
+            # print "time cost in computing score " + str(elasped)
             if self.training:
-                start = time.clock()
+                # start = time.clock()
                 g_heads_grand_sibling, g_heads = self.check_gold(batch_parent)
-                elasped = time.clock() - start
-                print "time cost in finding gold " + str(elasped)
+                # elasped = time.clock() - start
+                # print "time cost in finding gold " + str(elasped)
             else:
                 g_heads_grand_sibling = None
-            start = time.clock()
-            heads_grand_sibling, heads = EL_M1.batch_parse(ghms_scores.cpu(), g_heads_grand_sibling, self.training,
-                                                           self.gpu)
+            # start = time.clock()
+            heads_grand_sibling, heads = EL_M1.batch_parse(self.ghms_scores_table.cpu(), g_heads_grand_sibling,
+                                                           self.training, self.gpu)
             if not self.training:
                 for i in range(batch_size):
                     sen_idx = batch_sen[i]
                     self.parse_results[sen_idx] = heads[i]
                 return
-            elasped = time.clock() - start
-            print "time cost in parsing " + str(elasped)
+            # elasped = time.clock() - start
+            # print "time cost in parsing " + str(elasped)
             # print(heads)
             batch_base = torch.zeros((batch_size, sentence_length), dtype=torch.long)
             if self.gpu > -1 and torch.cuda.is_available():
@@ -170,13 +172,18 @@ class dep_model(nn.Module):
             if self.gpu > -1 and torch.cuda.is_available():
                 batch_margin = batch_margin.cuda()
             predicted_ghms = torch.gather(
-                ghms_scores.view(batch_size, sentence_length, sentence_length * sentence_length * sentence_length), 2,
+                self.ghms_scores_table.view(batch_size, sentence_length,
+                                            sentence_length * sentence_length * sentence_length), 2,
                 heads_grand_sibling.view(batch_size, sentence_length, 1))
             predicted_ghms = predicted_ghms + batch_margin.view(batch_size, sentence_length, 1)
             golden_ghms = torch.gather(
-                ghms_scores.view(batch_size, sentence_length, sentence_length * sentence_length * sentence_length), 2,
+                self.ghms_scores_table.view(batch_size, sentence_length,
+                                            sentence_length * sentence_length * sentence_length), 2,
                 g_heads_grand_sibling.view(batch_size, sentence_length, 1))
+            loss_compare = torch.zeros((batch_size, 1), dtype=torch.float)
             loss = predicted_ghms[:, 1:] - golden_ghms[:, 1:]
+            loss_copy = predicted_ghms[:, 1:] - golden_ghms[:, 1:]
+            loss = torch.max(torch.sum(loss,dim=1),loss_compare)
             loss = torch.sum(loss) / batch_size
             return loss
 

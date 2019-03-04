@@ -74,8 +74,8 @@ class dep_model(nn.Module):
         self.ghms_scores_table = torch.sum(torch.cat((grand_score, head_score, modifier_score, sibling_score), 2),
                                            dim=2)
         self.ghms_scores_table = torch.tanh(self.ghms_scores_table)
-        self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
-                                                             sentence_length, sentence_length)
+        # self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
+        #                                                      sentence_length, sentence_length)
         return
 
     def check_gold(self, batch_parent):
@@ -143,18 +143,36 @@ class dep_model(nn.Module):
         if self.order == 3:
             # start = time.clock()
             self.evaluate_m1(hidden_out)
-            # elasped = time.clock() - start
-            # print "time cost in computing score " + str(elasped)
             if self.training:
-                # start = time.clock()
-                g_heads_grand_sibling, g_heads = self.check_gold(batch_parent)
+                if self.gpu == -1:
+                    self.ghms_scores_table = self.ghms_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
+                else:
+                    self.ghms_scores_table = self.ghms_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
                 # elasped = time.clock() - start
-                # print "time cost in finding gold " + str(elasped)
+                # print "time cost in computing score " + str(elasped)
+                g_heads_grand_sibling, g_heads = self.check_gold(batch_parent)
+                self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length,
+                                                                     sentence_length * sentence_length * sentence_length)
+                for s in range(batch_size):
+                    for i in range(sentence_length):
+                        if self.gpu == -1:
+                            self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] = self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] \
+                                                                                        - torch.ones((1), dtype=torch.float)
+                        else:
+                            self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] = self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] \
+                                                                                        - torch.ones((1), dtype=torch.float).cuda()
+                self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
+                                                                     sentence_length, sentence_length)
             else:
                 g_heads_grand_sibling = None
+                self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
+                                                                     sentence_length, sentence_length)
             # start = time.clock()
-            heads_grand_sibling, heads = EL_M1.batch_parse(self.ghms_scores_table.cpu(), g_heads_grand_sibling,
-                                                           self.training, self.gpu)
+            heads_grand_sibling, heads, _ = EL_M1.batch_parse(self.ghms_scores_table.cpu())
+
+            if self.gpu > -1 and torch.cuda.is_available():
+                heads_grand_sibling = heads_grand_sibling.cuda()
+                g_heads_grand_sibling = g_heads_grand_sibling.cuda()
             if not self.training:
                 for i in range(batch_size):
                     sen_idx = batch_sen[i]
@@ -162,28 +180,18 @@ class dep_model(nn.Module):
                 return
             # elasped = time.clock() - start
             # print "time cost in parsing " + str(elasped)
-            # print(heads)
-            batch_base = torch.zeros((batch_size, sentence_length), dtype=torch.long)
-            if self.gpu > -1 and torch.cuda.is_available():
-                heads_grand_sibling = heads_grand_sibling.cuda()
-                g_heads_grand_sibling = g_heads_grand_sibling.cuda()
-                batch_base = batch_base.cuda()
-            batch_margin = torch.ne((g_heads_grand_sibling - heads_grand_sibling), batch_base).type(torch.float)
-            if self.gpu > -1 and torch.cuda.is_available():
-                batch_margin = batch_margin.cuda()
             predicted_ghms = torch.gather(
                 self.ghms_scores_table.view(batch_size, sentence_length,
                                             sentence_length * sentence_length * sentence_length), 2,
                 heads_grand_sibling.view(batch_size, sentence_length, 1))
-            predicted_ghms = predicted_ghms + batch_margin.view(batch_size, sentence_length, 1)
-            golden_ghms = torch.gather(
-                self.ghms_scores_table.view(batch_size, sentence_length,
-                                            sentence_length * sentence_length * sentence_length), 2,
-                g_heads_grand_sibling.view(batch_size, sentence_length, 1))
+            golden_ghms = torch.gather(self.ghms_scores_table.view(batch_size, sentence_length,
+                                                                   sentence_length * sentence_length * sentence_length), 2,
+                                       g_heads_grand_sibling.view(batch_size, sentence_length, 1))
             loss_compare = torch.zeros((batch_size, 1), dtype=torch.float)
+            if self.gpu > -1 and torch.cuda.is_available():
+                loss_compare = loss_compare.cuda()
             loss = predicted_ghms[:, 1:] - golden_ghms[:, 1:]
-            loss_copy = predicted_ghms[:, 1:] - golden_ghms[:, 1:]
-            loss = torch.max(torch.sum(loss,dim=1),loss_compare)
+            #loss = torch.max(torch.sum(loss, dim=1), loss_compare)
             loss = torch.sum(loss) / batch_size
             return loss
 

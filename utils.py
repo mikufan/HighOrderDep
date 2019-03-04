@@ -400,10 +400,7 @@ def m1_constituent_index(sentence_length, multiroot):
                     if grand_idx < left_idx or grand_idx > right_idx or (
                                         grand_idx == left_idx and left_idx == 0 and dir == 1):
                         id_2_span[counter_id] = (grand_idx, left_idx, right_idx, dir)
-                        if dir == 0:
-                            id_2_sib[counter_id] = sibling_candidates[0:len(sibling_candidates) - 1]
-                        else:
-                            id_2_sib[counter_id] = sibling_candidates[1:]
+                        id_2_sib[counter_id] = sibling_candidates[0:len(sibling_candidates) - 1]
                         counter_id += 1
 
     span_2_id = {s: id for id, s in id_2_span.items()}

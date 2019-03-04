@@ -3,7 +3,7 @@ import utils
 import numpy as np
 
 
-def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
+def batch_parse(batch_ghms_scores):
     batch_size, sentence_length, _, _, _ = batch_ghms_scores.shape
     # CYK table
     complete_table = torch.zeros((batch_size, sentence_length * sentence_length * sentence_length * 2),
@@ -37,41 +37,20 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
     for ijk in ijkss:
         (k, i, j, dir) = id_2_span[ijk]
         if dir == 0:
-
             # construct incomplete spans
             num_jimc = len(jimics[ijk])
             if num_jimc > 0:
                 jim_ci = complete_table[:, jimics[ijk]].view(batch_size, 1)
                 kmj_ci = complete_table[:, kmjics[ijk]].view(batch_size, 1)
-                base = torch.zeros((batch_size, 1), dtype=torch.long)
-                compare = torch.LongTensor([k * sentence_length * sentence_length + j * sentence_length + j])
-                compare = compare.repeat(batch_size, 1)
-                if training:
-                    margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(
-                        torch.float)
-                else:
-                    margin = torch.zeros((batch_size, 1), dtype=torch.float)
-                # if gpu > -1 and torch.cuda.is_available():
-                #     margin = margin.cuda()
-                span_ci = jim_ci + kmj_ci + batch_ghms_scores[:, i, k, j, j].view(batch_size, 1) + margin
+                span_ci = jim_ci + kmj_ci + batch_ghms_scores[:, i, k, j, j].view(batch_size, 1)  # + margin
                 num_jim = len(jimis[ijk])
                 span_i = span_ci
                 if num_jim > 0:
                     jim_sibi = sibling_table[:, jimis[ijk]].view(batch_size, num_jim)
                     kmj_ii = incomplete_table[:, kmjis[ijk]].view(batch_size, num_jim)
                     sibs = id_2_sib[ijk]
-                    base = torch.zeros((batch_size, 1), dtype=torch.long)
-                    compare = torch.LongTensor(
-                        [k * sentence_length * sentence_length + j * sentence_length]) + torch.LongTensor(sibs)
-                    compare = compare.repeat(batch_size, 1)
-                    if training:
-                        margin = torch.ne((g_heads_grand_sibling[:, i].view(batch_size, 1) - compare), base).type(
-                            torch.float)
-                    else:
-                        margin = torch.zeros((batch_size, num_jim), dtype=torch.float)
-                    # if gpu > -1 and torch.cuda.is_available():
-                    #     margin = margin.cuda()
-                    span_ii = jim_sibi + kmj_ii + batch_ghms_scores[:, i, k, j, sibs].view(batch_size, num_jim) + margin
+                    span_ii = jim_sibi + kmj_ii + batch_ghms_scores[:, i, k, j, sibs].view(batch_size,
+                                                                                           num_jim)  # + margin
                     span_i = torch.cat((span_ii, span_i), dim=1)
                 incomplete_table[:, ijk] = torch.max(span_i, dim=1)[0]
                 incomplete_backtrack[:, ijk] = torch.max(span_i, dim=1)[1]
@@ -97,35 +76,14 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
             if num_kimc > 0:
                 kim_ci = complete_table[:, kimics[ijk]].view(batch_size, 1)
                 imj_ci = complete_table[:, imjics[ijk]].view(batch_size, 1)
-                base = torch.zeros((batch_size, 1), dtype=torch.long)
-                compare = torch.LongTensor([k * sentence_length * sentence_length + i * sentence_length + i])
-                compare = compare.repeat(batch_size, 1)
-                if training:
-                    margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
-                        torch.float)
-                else:
-                    margin = torch.zeros((batch_size, 1), dtype=torch.float)
-                # if gpu > -1 and torch.cuda.is_available():
-                #     margin = margin.cuda()
-                span_ci = kim_ci + imj_ci + batch_ghms_scores[:, j, k, i, i].view(batch_size, 1) + margin
+                span_ci = kim_ci + imj_ci + batch_ghms_scores[:, j, k, i, i].view(batch_size, 1)  # + margin
                 span_i = span_ci
-                num_jim = len(jimis[ijk])
-                if num_jim > 0:
+                num_kim = len(kimis[ijk])
+                if num_kim > 0:
                     kim_ii = incomplete_table[:, kimis[ijk]].view(batch_size, num_kim)
                     imj_sibi = sibling_table[:, imjis[ijk]].view(batch_size, num_kim)
                     sibs = id_2_sib[ijk]
-                    base = torch.zeros((batch_size, 1), dtype=torch.long)
-                    compare = torch.LongTensor(
-                        [k * sentence_length * sentence_length + i * sentence_length]) + torch.LongTensor(sibs)
-                    compare = compare.repeat(batch_size, 1)
-                    if training:
-                        margin = torch.ne((g_heads_grand_sibling[:, j].view(batch_size, 1) - compare), base).type(
-                            torch.float)
-                    else:
-                        margin = torch.zeros((batch_size, num_jim), dtype=torch.float)
-                    # if gpu > -1 and torch.cuda.is_available():
-                    #     margin = margin.cuda()
-                    span_ii = kim_ii + imj_sibi + batch_ghms_scores[:, j, k, i, sibs].view(batch_size, num_jim) + margin
+                    span_ii = kim_ii + imj_sibi + batch_ghms_scores[:, j, k, i, sibs].view(batch_size, num_kim)  # + margin
                     span_i = torch.cat((span_i, span_ii), dim=1)
                 max_span = torch.max(span_i, dim=1)[1]
                 incomplete_table[:, ijk] = torch.max(span_i, dim=1)[0]
@@ -158,7 +116,7 @@ def batch_parse(batch_ghms_scores, g_heads_grand_sibling, training, gpu):
                            heads, ijkss, jimcs, kmjcs, jimis, kmjis, jimics, kmjics, kimsib, kmjsib, kimcs, imjcs,
                            kimis, imjis, kimics, imjics, id_2_span, s)
 
-    return heads_grand_sibling, heads
+    return heads_grand_sibling, heads, final_score
 
 
 def batch_backtracking(incomplete_backtrack, complete_backtrack, sibling_backtrack, span_id, span_type,

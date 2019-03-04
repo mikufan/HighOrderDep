@@ -20,9 +20,9 @@ if __name__ == '__main__':
     parser.add_option("--batch", type="int", dest="batchsize", default=1000)
     parser.add_option("--model", dest="model", help="Load/Save model file", metavar="FILE",
                       default="output/neuralhighorder.model")
-    parser.add_option("--wembedding", type="int", dest="wembedding_dim", default=100)
+    parser.add_option("--wembedding", type="int", dest="wembedding_dim", default=200)
     parser.add_option("--pembedding", type="int", dest="pembedding_dim", default=25)
-    parser.add_option("--hidden", type="int", dest="hidden_dim", default=25)
+    parser.add_option("--hidden", type="int", dest="hidden_dim", default=50)
     parser.add_option("--pre_output", type="int", dest="pre_output", default=25)
     parser.add_option("--nLayer", type="int", dest="n_layer", default=1)
     parser.add_option("--params", dest="params", help="Parameters file", metavar="FILE", default="params.pickle")
@@ -64,12 +64,16 @@ if __name__ == '__main__':
         eval_batch_data = utils.construct_batch_data(eval_data_list, options.batchsize)
 
         for batch_id, one_batch in tqdm(enumerate(eval_batch_data), mininterval=2,
-                                        desc=' -Tot it %d (epoch %d)' % (len(eval_batch_data), 0), leave=False, file=sys.stdout):
-            eval_batch_words, eval_batch_pos, eval_batch_sen = [s[0] for s in one_batch], [s[1] for s in one_batch], \
-                                                               [s[3][0] for s in one_batch]
+                                        desc=' -Tot it %d (epoch %d)' % (len(eval_batch_data), 0), leave=False,
+                                        file=sys.stdout):
+            eval_batch_words, eval_batch_pos, eval_batch_parent, eval_batch_sen = [s[0] for s in one_batch], \
+                                                                                  [s[1] for s in one_batch], \
+                                                                                  [s[2] for s in one_batch], \
+                                                                                  [s[3][0] for s in one_batch]
             eval_batch_words_v = torch.LongTensor(eval_batch_words)
             eval_batch_pos_v = torch.LongTensor(eval_batch_pos)
-            dep_model(eval_batch_words_v, eval_batch_pos_v, None, eval_batch_sen)
+            eval_batch_parent_v = torch.LongTensor(eval_batch_parent)
+            dep_model(eval_batch_words_v, eval_batch_pos_v, eval_batch_parent_v, eval_batch_sen)
             del dep_model.ghms_scores_table
             if options.gpu > -1 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -106,29 +110,24 @@ if __name__ == '__main__':
         for batch_id, one_batch in tqdm(enumerate(batch_data), mininterval=2,
                                         desc=' -Tot it %d (epoch %d)' % (tot_batch, 0), leave=False, file=sys.stdout):
             batch_loss_list = []
-
-            #     # batch_likelihood += sub_batch_likelihood
-            #print "the length of sentences in this batch is " + str(len(one_batch[0][0]))
             batch_words, batch_pos, batch_parent, batch_sen = [s[0] for s in one_batch], [s[1] for s in one_batch], [
                 s[2] for s in one_batch], [s[3][0] for s in one_batch]
             batch_words_v = torch.LongTensor(batch_words)
             batch_pos_v = torch.LongTensor(batch_pos)
             batch_parent_v = torch.LongTensor(batch_parent)
             batch_loss = high_order_dep_model(batch_words_v, batch_pos_v, batch_parent_v, batch_sen)
-            #start = time.clock()
+            # start = time.clock()
             batch_loss.backward()
             high_order_dep_model.trainer.step()
             high_order_dep_model.trainer.zero_grad()
-            #elasped = time.clock() - start
-            #print "time cost in optimization " + str(elasped)
+            # elasped = time.clock() - start
+            # print "time cost in optimization " + str(elasped)
             del high_order_dep_model.ghms_scores_table
             if options.gpu > -1 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
             iter_loss += batch_loss.cpu()
         iter_loss /= tot_batch
         print ' loss for this iteration ', str(iter_loss.detach().data.numpy())
-
-            # print 'likelihood for this iteration ', training_likelihood
         if options.do_eval:
             do_eval(high_order_dep_model, w2i, pos, options)
 

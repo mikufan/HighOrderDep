@@ -71,6 +71,9 @@ class dep_model(nn.Module):
         sibling_score = self.hidden2sibling(hidden_out)
         sibling_score = self.sibling_out(sibling_score)
         sibling_score = self.feature_transform(sibling_score, 0, 3)
+
+        # Concate all scores and add them together
+
         self.ghms_scores_table = torch.sum(torch.cat((grand_score, head_score, modifier_score, sibling_score), 2),
                                            dim=2)
         self.ghms_scores_table = torch.tanh(self.ghms_scores_table)
@@ -144,25 +147,26 @@ class dep_model(nn.Module):
             # start = time.clock()
             self.evaluate_m1(hidden_out)
             if self.training:
+
+                # Add the margin for all the scores
+
                 if self.gpu == -1:
                     self.ghms_scores_table = self.ghms_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
                 else:
                     self.ghms_scores_table = self.ghms_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
                 # elasped = time.clock() - start
                 # print "time cost in computing score " + str(elasped)
+
                 g_heads_grand_sibling, g_heads = self.check_gold(batch_parent)
-                self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length,
-                                                                     sentence_length * sentence_length * sentence_length)
+                self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length, sentence_length)
                 for s in range(batch_size):
                     for i in range(sentence_length):
                         if self.gpu == -1:
-                            self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] = self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] \
-                                                                                        - torch.ones((1), dtype=torch.float)
+                            self.ghms_scores_table[s, i, :, g_heads[s, i], :] = self.ghms_scores_table[s, i, :, g_heads[s, i], :] \
+                                                                                - torch.ones((1), dtype=torch.float)
                         else:
-                            self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] = self.ghms_scores_table[s, i, g_heads_grand_sibling[s, i]] \
-                                                                                        - torch.ones((1), dtype=torch.float).cuda()
-                self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
-                                                                     sentence_length, sentence_length)
+                            self.ghms_scores_table[s, i, :, g_heads[s, i], :] = self.ghms_scores_table[s, i, :, g_heads[s, i], :] \
+                                                                                - torch.ones((1), dtype=torch.float).cuda()
             else:
                 g_heads_grand_sibling = None
                 self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
@@ -191,7 +195,7 @@ class dep_model(nn.Module):
             if self.gpu > -1 and torch.cuda.is_available():
                 loss_compare = loss_compare.cuda()
             loss = predicted_ghms[:, 1:] - golden_ghms[:, 1:]
-            #loss = torch.max(torch.sum(loss, dim=1), loss_compare)
+            # loss = torch.max(torch.sum(loss, dim=1), loss_compare)
             loss = torch.sum(loss) / batch_size
             return loss
 

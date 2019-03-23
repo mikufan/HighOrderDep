@@ -51,12 +51,12 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
 
     if options.gpu >= 0 and torch.cuda.is_available():
-        print 'To use gpu' + str(options.gpu)
+        print('To use gpu' + str(options.gpu))
 
 
     def do_eval(dep_model, w2i, pos, options):
-        print "===================================="
-        print 'Do evaluation'
+        print("====================================")
+        print('Do evaluation')
         eval_sentences = utils.read_data(options.dev, True)
         dep_model.eval()
         eval_data_list = utils.construct_parsing_data_list(eval_sentences, w2i, pos, options.length_filter)
@@ -79,14 +79,14 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
         test_res = dep_model.parse_results
         utils.eval(test_res, eval_data_list, devpath, options.log + '_' + str(options.sample_idx), epoch)
-        print "===================================="
+        print("====================================")
 
 
     w2i, pos, sentences = utils.read_data(options.train, False)
-    print 'Data read'
+    print('Data read')
     with open(os.path.join(options.output, options.params + '_' + str(options.sample_idx)), 'w') as paramsfp:
         pickle.dump((w2i, pos, options), paramsfp)
-    print 'Parameters saved'
+    print('Parameters saved')
     # torch.manual_seed(options.seed)
     data_list = utils.construct_parsing_data_list(sentences, w2i, pos, options.length_filter)
     # batch_data = utils.construct_update_batch_data(data_list, options.batchsize)
@@ -94,15 +94,15 @@ if __name__ == '__main__':
         batch_data = utils.construct_imbalanced_batch_data(data_list, options.batchsize)
     else:
         batch_data = utils.construct_batch_data(data_list, options.batchsize)
-    print 'Batch data constructed'
+    print('Batch data constructed')
     high_order_dep_model = HODP_MODEL(w2i, pos, options)
-    print 'Model constructed'
+    print('Model constructed')
     if options.gpu >= 0 and torch.cuda.is_available():
         torch.cuda.set_device(options.gpu)
         high_order_dep_model.cuda(options.gpu)
 
     for epoch in range(options.epochs):
-        print 'Starting epoch', epoch
+        print('Starting epoch', epoch)
         high_order_dep_model.train()
         iter_loss = 0.0
         tot_batch = len(batch_data)
@@ -127,8 +127,8 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
             iter_loss += batch_loss.cpu()
         iter_loss /= tot_batch
-        print ' loss for this iteration ', str(iter_loss.detach().data.numpy())
+        print(' loss for this iteration ', str(iter_loss.detach().data.numpy()))
         if options.do_eval:
             do_eval(high_order_dep_model, w2i, pos, options)
 
-print 'Training finished'
+print('Training finished')

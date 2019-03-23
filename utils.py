@@ -291,7 +291,7 @@ def eval(predicted, gold, test_path, log_path, epoch):
                 correct_counter += 1
             total_counter += 1
     accuracy = float(correct_counter) / total_counter
-    print 'UAS is ' + str(accuracy * 100) + '%'
+    print ('UAS is ' + str(accuracy * 100) + '%')
     # f_w = open(test_path, 'w')
     # for s, sentence in enumerate(gold):
     #     for entry in sentence.entries:

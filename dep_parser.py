@@ -84,8 +84,8 @@ if __name__ == '__main__':
 
     w2i, pos, sentences = utils.read_data(options.train, False)
     print('Data read')
-    with open(os.path.join(options.output, options.params + '_' + str(options.sample_idx)), 'w') as paramsfp:
-        pickle.dump((w2i, pos, options), paramsfp)
+    paramsfp = open(options.output + '/' + options.params + '_' + str(options.sample_idx), 'wb')
+    pickle.dump((w2i, pos, options), paramsfp)
     print('Parameters saved')
     # torch.manual_seed(options.seed)
     data_list = utils.construct_parsing_data_list(sentences, w2i, pos, options.length_filter)

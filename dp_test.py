@@ -10,6 +10,6 @@ ghms_score[0,3,0,1,2]+=1
 
 
 heads_grand_sibling, heads,final_score = EL.batch_parse(ghms_score)
-print (heads_grand_sibling)
-print (heads)
-print (final_score)
+print heads_grand_sibling
+print heads
+print final_score

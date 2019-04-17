@@ -68,9 +68,9 @@ if __name__ == '__main__':
                                         file=sys.stdout):
             if not options.sparse_feature:
                 eval_batch_words, eval_batch_pos, eval_batch_parent, eval_batch_sen = [s[0] for s in one_batch], \
-                                                                                  [s[1] for s in one_batch], \
-                                                                                  [s[2] for s in one_batch], \
-                                                                                  [s[3][0] for s in one_batch]
+                                                                                      [s[1] for s in one_batch], \
+                                                                                      [s[2] for s in one_batch], \
+                                                                                      [s[3][0] for s in one_batch]
                 eval_batch_words_v = torch.LongTensor(eval_batch_words)
                 eval_batch_pos_v = torch.LongTensor(eval_batch_pos)
                 eval_batch_parent_v = torch.LongTensor(eval_batch_parent)
@@ -93,8 +93,9 @@ if __name__ == '__main__':
     if not options.sparse_feature:
         w2i, pos, sentences = utils.read_data(options.train, False)
         features = None
+        feature_type = None
     else:
-        w2i, pos, features, sentences = utils.read_sparse_data(options.train, False)
+        w2i, pos, features, sentences, feature_type = utils.read_sparse_data(options.train, False, options.order)
     print 'Data read'
     with open(os.path.join(options.output, options.params + '_' + str(options.sample_idx)), 'w') as paramsfp:
         if not options.sparse_feature:
@@ -104,7 +105,8 @@ if __name__ == '__main__':
     print 'Parameters saved'
     # torch.manual_seed(options.seed)
 
-    data_list = utils.construct_parsing_data_list(sentences, w2i, pos, options.length_filter, options.sparse_feature, features)
+    data_list = utils.construct_parsing_data_list(sentences, w2i, pos, options.length_filter, options.sparse_feature,
+                                                  options.order, feature_type, features)
 
     # batch_data = utils.construct_update_batch_data(data_list, options.batchsize)
     if options.imbalanced_batch:

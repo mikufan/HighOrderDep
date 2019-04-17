@@ -277,11 +277,12 @@ def get_index(b, id):
     return (id_a, id_b)
 
 
-def read_sparse_data(conll_path, isPredict):
+def read_sparse_data(conll_path, isPredict, order):
     sentences = []
     wordsCount = Counter()
     posCount = Counter()
     featureSet = set()
+    featureType = set()
     s_counter = 0
     with open(conll_path, 'r') as conllFP:
         for sentence in read_conll(conllFP):
@@ -289,16 +290,16 @@ def read_sparse_data(conll_path, isPredict):
             posCount.update([node.pos for node in sentence if isinstance(node, ConllEntry)])
             ds = data_sentence(s_counter, sentence)
             sentences.append(ds)
-            update_features(featureSet, ds)
+            update_features(featureSet, ds, featureType, order)
             s_counter += 1
     wordsCount['<UNKNOWN>'] = 0
     posCount['<UNKNOWN-POS>'] = 0
     featureSet.add('<UNKNOWN-FEATS>')
     return {w: i for i, w in enumerate(wordsCount.keys())}, {p: i for i, p in enumerate(
-        posCount.keys())}, {f: i for i, f in enumerate(featureSet)}, sentences
+        posCount.keys())}, {f: i for i, f in enumerate(featureSet)}, sentences, featureType
 
 
-def update_features(featureSet, data_sentence):
+def update_features(featureSet, data_sentence, featureType, order):
     entries = data_sentence.entries
     for i in range(data_sentence.size):
         for j in range(data_sentence.size):
@@ -340,34 +341,49 @@ def update_features(featureSet, data_sentence):
             l_right_trigram = (entries[small].pos, p_left_right, entries[large].pos, dir)
             r_left_trigram = (entries[small].pos, entries[large].pos, p_right_left, dir)
             r_right_trigram = (entries[small].pos, entries[large].pos, p_right, dir)
-
-            for g in range(data_sentence.size):
-                if not (g < small or g > large):
-                    continue
-                for sib in range(data_sentence.size):
-                    if dir == 0 and not (small < sib <= large):
-                        continue
-                    if dir == 1 and not (small <= sib < large):
+            if order > 1:
+                for g in range(data_sentence.size):
+                    if not (g < small or g > large):
                         continue
                     ghm = (entries[g].pos, entries[small].pos, entries[large].pos, dir)
                     ghm_lex = (entries[g].norm, entries[small].norm, entries[large].norm, dir)
-                    ghms = (entries[g].pos, entries[small].pos, entries[large].pos, entries[sib].pos, dir)
-                    ghms_lex = (entries[g].norm, entries[small].norm, entries[large].norm, entries[sib].norm, dir)
                     featureSet.add(ghm)
                     featureSet.add(ghm_lex)
-                    featureSet.add(ghms)
-                    featureSet.add(ghms_lex)
+                    featureType.add('ghm')
+                    featureType.add('ghm_lex')
+                    if order > 2:
+                        for sib in range(data_sentence.size):
+                            if dir == 0 and not (small < sib <= large):
+                                continue
+                            if dir == 1 and not (small <= sib < large):
+                                continue
+                            ghms = (entries[g].pos, entries[small].pos, entries[large].pos, entries[sib].pos, dir)
+                            ghms_lex = (entries[g].norm, entries[small].norm, entries[large].norm, entries[sib].norm, dir)
+                            featureSet.add(ghms)
+                            featureSet.add(ghms_lex)
+                            featureType.add('ghms')
+                            featureType.add('ghms_lex')
 
             featureSet.add(left_unary)
             featureSet.add(left_unary_lex)
+            featureType.add('left_unary')
+            featureType.add('left_unary_lex')
             featureSet.add(right_unary)
             featureSet.add(right_unary_lex)
+            featureType.add('right_unary')
+            featureType.add('right_unary_lex')
             featureSet.add(binary)
             featureSet.add(binary_lex)
+            featureType.add('binary')
+            featureType.add('binary_lex')
             featureSet.add(l_left_trigram)
             featureSet.add(l_right_trigram)
+            featureType.add('l_left_trigram')
+            featureType.add('l_right_trigram')
             featureSet.add(r_left_trigram)
             featureSet.add(r_right_trigram)
+            featureType.add('r_left_trigram')
+            featureType.add('r_right_trigram')
 
 
 def eval(predicted, gold, test_path, log_path, epoch):
@@ -461,8 +477,13 @@ def construct_data_list(sentences, words, pos):
     return data_list
 
 
-def construct_feats(feats, s):
-    feature_list = np.zeros((s.size, s.size, s.size, s.size, 14))
+def construct_feats(feats, s, feats_type, order):
+    if order == 1:
+        feature_list = np.zeros((s.size, s.size, len(feats_type)))
+    if order == 2:
+        feature_list = np.zeros((s.size, s.size, s.size, len(feats_type)))
+    if order == 3:
+        feature_list = np.zeros((s.size, s.size, s.size, s.size, len(feats_type)))
     entries = s.entries
     unknown_idx = feats['<UNKNOWN-FEATS>']
     feature_list.fill(unknown_idx)
@@ -516,24 +537,34 @@ def construct_feats(feats, s):
             l_right_trigram_idx = feats.get(l_right_trigram, unknown_idx)
             r_left_trigram_idx = feats.get(r_left_trigram, unknown_idx)
             r_right_trigram_idx = feats.get(r_right_trigram, unknown_idx)
-            for g in range(s.size):
-                for sib in range(s.size):
+            if order == 1:
+                single_feature = [l_unary_idx, l_unary_lex_idx, r_unary_idx, r_unary_lex_idx, binary_idx, binary_lex_idx, l_left_trigram_idx, l_right_trigram_idx,
+                                  r_left_trigram_idx, r_right_trigram_idx]
+                feature_list[i, j, :] = np.array(single_feature)[:]
+            if order > 1:
+                for g in range(s.size):
                     ghm = (entries[g].pos, entries[small].pos, entries[large].pos, dir)
                     ghm_lex = (entries[g].norm, entries[small].norm, entries[large].norm, dir)
-                    ghms = (entries[g].pos, entries[small].pos, entries[large].pos, entries[sib].pos, dir)
-                    ghms_lex = (entries[g].norm, entries[small].norm, entries[large].norm, entries[sib].norm, dir)
                     ghm_idx = feats.get(ghm, unknown_idx)
                     ghm_lex_idx = feats.get(ghm_lex, unknown_idx)
-                    ghms_idx = feats.get(ghms, unknown_idx)
-                    ghms_lex_idx = feats.get(ghms_lex, unknown_idx)
+                    if order == 2:
+                        single_feature = [l_unary_idx, l_unary_lex_idx, r_unary_idx, r_unary_lex_idx, binary_idx, binary_lex_idx, l_left_trigram_idx, l_right_trigram_idx,
+                                          r_left_trigram_idx, r_left_trigram_idx]
+                        feature_list[i, g, j, :] = np.array(single_feature)[:]
+                    if order == 3:
+                        for sib in range(s.size):
+                            ghms = (entries[g].pos, entries[small].pos, entries[large].pos, entries[sib].pos, dir)
+                            ghms_lex = (entries[g].norm, entries[small].norm, entries[large].norm, entries[sib].norm, dir)
+                            ghms_idx = feats.get(ghms, unknown_idx)
+                            ghms_lex_idx = feats.get(ghms_lex, unknown_idx)
 
-                    single_feature = [l_unary_idx, l_unary_lex_idx, r_unary_idx, r_unary_lex_idx, binary_idx, binary_lex_idx, l_left_trigram_idx, l_right_trigram_idx,
-                                      r_left_trigram_idx, r_right_trigram_idx, ghm_idx, ghm_lex_idx, ghms_idx, ghms_lex_idx]
-                    feature_list[i, g, j, sib, :] = np.array(single_feature)[:]
+                            single_feature = [l_unary_idx, l_unary_lex_idx, r_unary_idx, r_unary_lex_idx, binary_idx, binary_lex_idx, l_left_trigram_idx, l_right_trigram_idx,
+                                          r_left_trigram_idx, r_right_trigram_idx, ghm_idx, ghm_lex_idx, ghms_idx, ghms_lex_idx]
+                            feature_list[i, g, j, sib, :] = np.array(single_feature)[:]
     return feature_list
 
 
-def construct_parsing_data_list(sentences, words, pos, filter, sparse, feats=None):
+def construct_parsing_data_list(sentences, words, pos, filter, sparse, order, feats_type=None, feats=None):
     data_list = list()
     sen_idx = 0
     for s in sentences:
@@ -546,7 +577,7 @@ def construct_parsing_data_list(sentences, words, pos, filter, sparse, feats=Non
         s_data_list.append(s_parent)
         s_data_list.append([sen_idx])
         if sparse:
-            s_feats = construct_feats(feats, s)
+            s_feats = construct_feats(feats, s, feats_type, order)
             s_data_list.append(s_feats)
         data_list.append(s_data_list)
         sen_idx += 1

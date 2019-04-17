@@ -4,6 +4,8 @@ import numpy as np
 from torch.nn.init import *
 from torch import optim
 import eisner_layer_m1 as EL_M1
+import eisner_layer_m0 as EL_M0
+import eisner_layer as EL
 import utils
 import time
 import torch.nn.functional as F
@@ -42,6 +44,8 @@ class dep_model(nn.Module):
             self.grand_out = nn.Linear(self.feature_dim, 1)
             self.head_out = nn.Linear(self.feature_dim, 1)
             self.modifier_out = nn.Linear(self.feature_dim, 1)
+
+            self.feature_out = nn.Linear(self.feature_dim, 1)
             self.plookup = nn.Embedding(len(pos), self.pdim)
             self.wlookup = nn.Embedding(len(self.words), self.embedding_dim)
         else:
@@ -52,6 +56,8 @@ class dep_model(nn.Module):
         self.parse_results = {}
 
         self.ghms_scores_table = None
+        self.hm_scores_table = None
+        self.ghm_scores_table = None
 
     def get_optim(self, parameters):
         if self.optim == 'sgd':
@@ -63,17 +69,58 @@ class dep_model(nn.Module):
         elif self.optim == 'adadelta':
             return optim.Adadelta(parameters, lr=self.learning_rate)
 
+    # scoring for first order model
+    def evaluate_1st(self, hidden_out):
+        head_score = self.hidden2head(hidden_out)
+        head_score = self.feature_transform(head_score, 0, 1)
+        modifier_score = self.hidden2modifier(hidden_out)
+        modifier_score = self.feature_transform(modifier_score, 1, 1)
+        self.hm_table = head_score + modifier_score
+        self.hm_table = torch.tanh(self.feature_out(self.hm_table))
+        return
+
+    # scoring for first order feature based model
+    def evaluate_1st_sparse(self, batch_feats):
+        batch_size, sentence_length, _, feature_length = batch_feats.shape
+        batch_scores = torch.index_select(self.feats_param, dim=0, index=batch_feats.view(-1))
+        batch_scores = batch_scores.view(batch_size, sentence_length, sentence_length, feature_length)
+        batch_scores = torch.sum(batch_scores, dim=3)
+        self.hm_scores_table = batch_scores.permute(0, 2, 1)
+        return
+
+    def evaluate_m0(self, hidden_out):
+        head_score = self.hidden2head(hidden_out)
+        head_score = self.feature_transform(head_score, 1, 2)
+        modifier_score = self.hidden2modifier(hidden_out)
+        modifier_score = self.feature_transform(modifier_score, 2, 2)
+        grand_score = self.hidden2sibling(hidden_out)
+        grand_score = self.feature_transform(grand_score, 0, 2)
+        self.ghm_scores_table = head_score + modifier_score + grand_score
+        self.ghm_scores_table = torch.tanh(self.feature_out(self.ghm_scores_table))
+        return
+
+    def evaluate_m0_sparse(self, batch_feats):
+        batch_size, sentence_length, _, _, feature_length = batch_feats.shape
+        batch_scores = torch.index_select(self.feats_param, dim=0, index=batch_feats.view(-1))
+        batch_scores = batch_scores.view(batch_size, sentence_length, sentence_length, sentence_length, feature_length)
+        batch_scores = torch.sum(batch_scores, dim=4)
+        self.ghm_scores_table = batch_scores
+        return
+
     def evaluate_m1(self, hidden_out):
-        batch_size, sentence_length = hidden_out.data.shape[0], hidden_out.data.shape[1]
+        # scores for grandparents
         grand_score = self.hidden2grand(hidden_out)
         grand_score = self.grand_out(grand_score)
         grand_score = self.feature_transform(grand_score, 2, 3)
+        # scores for dependency head
         head_score = self.hidden2head(hidden_out)
         head_score = self.head_out(head_score)
         head_score = self.feature_transform(head_score, 1, 3)
+        # scores for dependency child
         modifier_score = self.hidden2modifier(hidden_out)
         modifier_score = self.modifier_out(modifier_score)
         modifier_score = self.feature_transform(modifier_score, 3, 3)
+        # scores for siblings
         sibling_score = self.hidden2sibling(hidden_out)
         sibling_score = self.sibling_out(sibling_score)
         sibling_score = self.feature_transform(sibling_score, 0, 3)
@@ -83,8 +130,7 @@ class dep_model(nn.Module):
         self.ghms_scores_table = torch.sum(torch.cat((modifier_score, grand_score, head_score, sibling_score), 2),
                                            dim=2)
         self.ghms_scores_table = torch.tanh(self.ghms_scores_table)
-        # self.ghms_scores_table = self.ghms_scores_table.view(batch_size, sentence_length, sentence_length,
-        #                                                      sentence_length, sentence_length)
+
         return
 
     def evaluate_m1_sparse(self, batch_feats):
@@ -147,6 +193,17 @@ class dep_model(nn.Module):
                                     s, si_1] = grand * sentence_length * sentence_length + head * sentence_length + head
         return g_heads_grand_sibling, g_heads
 
+    def check_gold_m0(self, batch_parent):
+        batch_size, sentence_length = batch_parent.shape
+        g_heads = batch_parent
+        g_heads_grand = torch.zeros((batch_size, sentence_length), dtype=torch.long)
+        for s in range(batch_size):
+            for i in range(1, sentence_length):
+                head = g_heads[s, i]
+                grand = g_heads[s, head] if head != 0 else 0
+                g_heads_grand[s, i] = grand * sentence_length + head
+        return g_heads_grand, g_heads
+
     def forward(self, batch_words, batch_pos, batch_parent, batch_sen):
         batch_size, sentence_length = batch_words.data.size()
         if self.gpu > -1 and torch.cuda.is_available():
@@ -157,6 +214,85 @@ class dep_model(nn.Module):
         # w_embeds = self.dropout1(w_embeds)
         batch_input = torch.cat((w_embeds, p_embeds), 2)
         hidden_out, _ = self.lstm(batch_input)
+        if self.order == 1:
+            self.evaluate_1st(hidden_out)
+            if self.training:
+                if self.gpu == -1:
+                    self.hm_scores_table = self.hm_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
+                else:
+                    self.hm_scores_table = self.hm_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
+
+                g_heads = batch_parent
+                self.hm_scores_table = self.hm_scores_table.view(batch_size, sentence_length, sentence_length)
+                for s in range(batch_size):
+                    for i in range(sentence_length):
+                        if self.gpu == -1:
+                            self.hm_scores_table[s, i, g_heads[s, i]] = self.hm_scores_table[s, i, g_heads[s, i]] \
+                                                                        - torch.ones((1), dtype=torch.float)
+                        else:
+                            self.hm_scores_table[s, i, g_heads[s, i]] = self.hm_scores_table[s, i, g_heads[s, i]] \
+                                                                        - torch.ones((1), dtype=torch.float).cuda()
+            else:
+                g_heads = None
+                self.hm_scores_table = self.hm_scores_table.view(batch_size, sentence_length, sentence_length)
+            heads = EL.batch_parse(self.hm_scores_table.permute(0, 2, 1).cpu())
+
+            if not self.training:
+                for i in range(batch_size):
+                    sen_idx = batch_sen[i]
+                    self.parse_results[sen_idx] = heads[i]
+                return
+
+            if self.gpu > -1 and torch.cuda.is_available():
+                g_heads = g_heads.cuda()
+            predicted_hm = torch.gather(
+                self.hm_scores_table.view(batch_size, sentence_length, sentence_length), 2, heads.view(batch_size, sentence_length, 1))
+            golden_hm = torch.gather(self.hm_scores_table.view(batch_size, sentence_length, sentence_length), 2, g_heads.view(batch_size, sentence_length, 1))
+            loss = predicted_hm[:, 1:] - golden_hm[:, 1:]
+            loss = torch.sum(loss) / batch_size
+            return loss
+
+        if self.order == 2:
+            self.evaluate_m0(hidden_out)
+            if self.training:
+                if self.gpu == -1:
+                    self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
+                else:
+                    self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
+
+                g_heads_grand, g_heads = self.check_gold_m0(batch_parent)
+                self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length)
+                for s in range(batch_size):
+                    for i in range(sentence_length):
+                        if self.gpu == -1:
+                            self.ghm_scores_table[s, i, :, g_heads[s, i]] = self.ghm_scores_table[s, i, :, g_heads[s, i]] \
+                                                                            - torch.ones((1), dtype=torch.float)
+                        else:
+                            self.ghm_scores_table[s, i, :, g_heads[s, i]] = self.ghm_scores_table[s, i, :, g_heads[s, i]] \
+                                                                            - torch.ones((1), dtype=torch.float).cuda()
+            else:
+                g_heads_grand = None
+                self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length)
+                # start = time.clock()
+            heads_grand, heads, _ = EL_M0.batch_parse(self.ghm_scores_table.cpu())
+
+            if not self.training:
+                for i in range(batch_size):
+                    sen_idx = batch_sen[i]
+                    self.parse_results[sen_idx] = heads[i]
+                return
+
+            if self.gpu > -1 and torch.cuda.is_available():
+                heads_grand = heads_grand.cuda()
+                g_heads_grand = g_heads_grand.cuda()
+            predicted_ghm = torch.gather(
+                self.ghm_scores_table.view(batch_size, sentence_length, sentence_length * sentence_length), 2,
+                heads_grand.view(batch_size, sentence_length, 1))
+            golden_ghm = torch.gather(self.ghm_scores_table.view(batch_size, sentence_length, sentence_length * sentence_length), 2,
+                                      g_heads_grand.view(batch_size, sentence_length, 1))
+            loss = predicted_ghm[:, 1:] - golden_ghm[:, 1:]
+            loss = torch.sum(loss) / batch_size
+            return loss
         if self.order == 3:
             # start = time.clock()
             self.evaluate_m1(hidden_out)
@@ -218,8 +354,77 @@ class dep_model(nn.Module):
 
     # Sparse feature version of forward function
     def forward_sparse(self, batch_parent, batch_feats, batch_sen):
-        batch_size, sentence_length, _, _, _, _ = batch_feats.size()
+        if self.order == 1:
+            batch_size, sentence_length, _, _ = batch_feats.size()
+            self.evaluate_1st_sparse(batch_feats)
+            if self.training:
+                if self.gpu == -1:
+                    self.hm_scores_table = self.hm_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
+                else:
+                    self.hm_scores_table = self.hm_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
+                g_heads = self.batch_parent
+
+                # Remove margin for golden parse
+                for s in range(batch_size):
+                    for i in range(sentence_length):
+                        if self.gpu == -1:
+                            self.hm_scores_table[s, i, g_heads[s, i]] = self.hm_scores_table[s, i, g_heads[s, i]] \
+                                                                        - torch.ones((1), dtype=torch.float)
+                        else:
+                            self.hm_scores_table[s, i, g_heads[s, i]] = self.hm_scores_table[s, i, g_heads[s, i]] \
+                                                                        - torch.ones((1), dtype=torch.float).cuda()
+            else:
+                g_heads = None
+            heads, _ = EL.batch_parse(self.hm_scores_table.permute(0, 2, 1).cpu())
+            if not self.training:
+                for i in range(batch_size):
+                    sen_idx = batch_sen[i]
+                    self.parse_results[sen_idx] = heads[i]
+                return
+            predicted_hm = torch.gather(
+                self.hm_scores_table.contiguous().view(batch_size, sentence_length, sentence_length), 2, heads.view(batch_size, sentence_length, 1))
+            golden_hm = torch.gather(self.hm_scores_table.contiguous().view(batch_size, sentence_length, sentence_length), 2, g_heads.view(batch_size, sentence_length, 1))
+            loss = predicted_hm[:, 1:] - golden_hm[:, 1:]
+            loss = torch.sum(loss) / batch_size
+            return loss
+
+        if self.order == 2:
+            batch_size, sentence_length, _, _, _ = batch_feats.size()
+            self.evaluate_m0_sparse(batch_feats)
+            if self.training:
+                if self.gpu == -1:
+                    self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
+                else:
+                    self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
+                g_heads_grand, g_heads = self.check_gold_m0(batch_parent)
+
+                # Remove margin for golden parse
+                for s in range(batch_size):
+                    for i in range(sentence_length):
+                        if self.gpu == -1:
+                            self.ghm_scores_table[s, i, :, g_heads[s, i]] = self.ghm_scores_table[s, i, :, g_heads[s, i]] \
+                                                                            - torch.ones((1), dtype=torch.float)
+                        else:
+                            self.ghm_scores_table[s, i, :, g_heads[s, i]] = self.ghm_scores_table[s, i, :, g_heads[s, i]] \
+                                                                            - torch.ones((1), dtype=torch.float).cuda()
+            else:
+                g_heads_grand = None
+            heads_grand, heads, _ = EL_M1.batch_parse(self.ghm_scores_table.cpu())
+            if not self.training:
+                for i in range(batch_size):
+                    sen_idx = batch_sen[i]
+                    self.parse_results[sen_idx] = heads[i]
+                return
+
+            predicted_ghm = torch.gather(self.ghm_scores_table.contiguous().view(batch_size, sentence_length, sentence_length * sentence_length), 2,
+                                         heads_grand.view(batch_size, sentence_length, 1))
+            golden_ghm = torch.gather(self.ghm_scores_table.contiguous().view(batch_size, sentence_length, sentence_length * sentence_length), 2,
+                                      g_heads_grand.view(batch_size, sentence_length, 1))
+            loss = predicted_ghm[:, 1:] - golden_ghm[:, 1:]
+            loss = torch.sum(loss) / batch_size
+            return loss
         if self.order == 3:
+            batch_size, sentence_length, _, _, _, _ = batch_feats.size()
             self.evaluate_m1_sparse(batch_feats)
             if self.training:
                 if self.gpu == -1:

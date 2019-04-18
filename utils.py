@@ -195,11 +195,13 @@ def read_data(conll_path, isPredict):
         s_counter = 0
         with open(conll_path, 'r') as conllFP:
             for sentence in read_conll(conllFP):
-                wordsCount.update([node.norm for node in sentence if isinstance(node, ConllEntry)])
-                posCount.update([node.pos for node in sentence if isinstance(node, ConllEntry)])
-                ds = data_sentence(s_counter, sentence)
-                sentences.append(ds)
-                s_counter += 1
+                dropout = np.random.uniform()
+                if dropout > 0.9999:
+                    wordsCount.update([node.norm for node in sentence if isinstance(node, ConllEntry)])
+                    posCount.update([node.pos for node in sentence if isinstance(node, ConllEntry)])
+                    ds = data_sentence(s_counter, sentence)
+                    sentences.append(ds)
+                    s_counter += 1
         wordsCount['<UNKNOWN>'] = 0
         posCount['<UNKNOWN-POS>'] = 0
         return {w: i for i, w in enumerate(wordsCount.keys())}, {p: i for i, p in enumerate(

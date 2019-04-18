@@ -95,6 +95,7 @@ if __name__ == '__main__':
         features = None
     else:
         w2i, pos, features, sentences = utils.read_sparse_data(options.train, False)
+    print("w2i: ", len(w2i), "pos: ", len(pos), "sentences: ", len(sentences))
     print 'Data read'
     with open(os.path.join(options.output, options.params + '_' + str(options.sample_idx)), 'w') as paramsfp:
         if not options.sparse_feature:

@@ -20,9 +20,9 @@ if __name__ == '__main__':
     parser.add_option("--batch", type="int", dest="batchsize", default=1000)
     parser.add_option("--model", dest="model", help="Load/Save model file", metavar="FILE",
                       default="output/neuralhighorder.model")
-    parser.add_option("--wembedding", type="int", dest="wembedding_dim", default=200)
+    parser.add_option("--wembedding", type="int", dest="wembedding_dim", default=100)
     parser.add_option("--pembedding", type="int", dest="pembedding_dim", default=25)
-    parser.add_option("--hidden", type="int", dest="hidden_dim", default=50)
+    parser.add_option("--hidden", type="int", dest="hidden_dim", default=100)
     parser.add_option("--nLayer", type="int", dest="n_layer", default=1)
     parser.add_option("--params", dest="params", help="Parameters file", metavar="FILE", default="params.pickle")
 
@@ -54,12 +54,16 @@ if __name__ == '__main__':
         print 'To use gpu' + str(options.gpu)
 
 
-    def do_eval(dep_model, w2i, pos, options, feats=None):
+    def do_eval(dep_model, w2i, pos, options, feats=None, feature_type=None):
         print "===================================="
         print 'Do evaluation'
-        eval_sentences = utils.read_data(options.dev, True)
+        if not options.sparse_feature:
+            eval_sentences = utils.read_data(options.dev, True)
+        else:
+            eval_sentences = utils.read_sparse_data(options.dev, True, options.order)
         dep_model.eval()
-        eval_data_list = utils.construct_parsing_data_list(eval_sentences, w2i, pos, options.length_filter, options.sparse_feature, feats)
+        eval_data_list = utils.construct_parsing_data_list(eval_sentences, w2i, pos, options.length_filter,
+                                                           options.sparse_feature, options.order, feature_type, feats)
         devpath = os.path.join(options.output, 'test_pred' + str(epoch + 1) + '_' + str(options.sample_idx))
         eval_batch_data = utils.construct_batch_data(eval_data_list, options.batchsize)
 
@@ -82,7 +86,12 @@ if __name__ == '__main__':
                 batch_feats = torch.LongTensor(batch_feats)
                 batch_parent_v = torch.LongTensor(batch_parent)
                 dep_model.forward_sparse(batch_parent_v, batch_feats, batch_sen)
-            del dep_model.ghms_scores_table
+            if options.order == 1:
+                del dep_model.hm_scores_table
+            if options.order == 2:
+                del dep_model.ghm_scores_table
+            if options.order == 3:
+                del dep_model.ghms_scores_table
             if options.gpu > -1 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
         test_res = dep_model.parse_results
@@ -149,7 +158,12 @@ if __name__ == '__main__':
             high_order_dep_model.trainer.zero_grad()
             # elasped = time.clock() - start
             # print "time cost in optimization " + str(elasped)
-            del high_order_dep_model.ghms_scores_table
+            if options.order == 1:
+                del high_order_dep_model.hm_scores_table
+            if options.order == 2:
+                del high_order_dep_model.ghm_scores_table
+            if options.order == 3:
+                del high_order_dep_model.ghms_scores_table
             if options.gpu > -1 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
             iter_loss += batch_loss.cpu()
@@ -159,6 +173,6 @@ if __name__ == '__main__':
             if not options.sparse_feature:
                 do_eval(high_order_dep_model, w2i, pos, options)
             else:
-                do_eval(high_order_dep_model, w2i, pos, options, features)
+                do_eval(high_order_dep_model, w2i, pos, options, features, feature_type)
 
 print 'Training finished'

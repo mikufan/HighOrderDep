@@ -279,24 +279,33 @@ def get_index(b, id):
 
 def read_sparse_data(conll_path, isPredict, order):
     sentences = []
-    wordsCount = Counter()
-    posCount = Counter()
-    featureSet = set()
-    featureType = set()
-    s_counter = 0
-    with open(conll_path, 'r') as conllFP:
-        for sentence in read_conll(conllFP):
-            wordsCount.update([node.norm for node in sentence if isinstance(node, ConllEntry)])
-            posCount.update([node.pos for node in sentence if isinstance(node, ConllEntry)])
-            ds = data_sentence(s_counter, sentence)
-            sentences.append(ds)
-            update_features(featureSet, ds, featureType, order)
-            s_counter += 1
-    wordsCount['<UNKNOWN>'] = 0
-    posCount['<UNKNOWN-POS>'] = 0
-    featureSet.add('<UNKNOWN-FEATS>')
-    return {w: i for i, w in enumerate(wordsCount.keys())}, {p: i for i, p in enumerate(
-        posCount.keys())}, {f: i for i, f in enumerate(featureSet)}, sentences, featureType
+    if not isPredict:
+        wordsCount = Counter()
+        posCount = Counter()
+        featureSet = set()
+        featureType = set()
+        s_counter = 0
+        with open(conll_path, 'r') as conllFP:
+            for sentence in read_conll(conllFP):
+                wordsCount.update([node.norm for node in sentence if isinstance(node, ConllEntry)])
+                posCount.update([node.pos for node in sentence if isinstance(node, ConllEntry)])
+                ds = data_sentence(s_counter, sentence)
+                sentences.append(ds)
+                update_features(featureSet, ds, featureType, order)
+                s_counter += 1
+        wordsCount['<UNKNOWN>'] = 0
+        posCount['<UNKNOWN-POS>'] = 0
+        featureSet.add('<UNKNOWN-FEATS>')
+        return {w: i for i, w in enumerate(wordsCount.keys())}, {p: i for i, p in enumerate(
+            posCount.keys())}, {f: i for i, f in enumerate(featureSet)}, sentences, featureType
+    else:
+        with open(conll_path, 'r') as conllFP:
+            s_counter = 0
+            for sentence in read_conll(conllFP):
+                ds = data_sentence(s_counter, sentence)
+                sentences.append(ds)
+                s_counter += 1
+        return sentences
 
 
 def update_features(featureSet, data_sentence, featureType, order):
@@ -549,7 +558,7 @@ def construct_feats(feats, s, feats_type, order):
                     ghm_lex_idx = feats.get(ghm_lex, unknown_idx)
                     if order == 2:
                         single_feature = [l_unary_idx, l_unary_lex_idx, r_unary_idx, r_unary_lex_idx, binary_idx, binary_lex_idx, l_left_trigram_idx, l_right_trigram_idx,
-                                          r_left_trigram_idx, r_left_trigram_idx]
+                                          r_left_trigram_idx, r_left_trigram_idx, ghm_idx, ghm_lex_idx]
                         feature_list[i, g, j, :] = np.array(single_feature)[:]
                     if order == 3:
                         for sib in range(s.size):
@@ -559,7 +568,7 @@ def construct_feats(feats, s, feats_type, order):
                             ghms_lex_idx = feats.get(ghms_lex, unknown_idx)
 
                             single_feature = [l_unary_idx, l_unary_lex_idx, r_unary_idx, r_unary_lex_idx, binary_idx, binary_lex_idx, l_left_trigram_idx, l_right_trigram_idx,
-                                          r_left_trigram_idx, r_right_trigram_idx, ghm_idx, ghm_lex_idx, ghms_idx, ghms_lex_idx]
+                                              r_left_trigram_idx, r_right_trigram_idx, ghm_idx, ghm_lex_idx, ghms_idx, ghms_lex_idx]
                             feature_list[i, g, j, sib, :] = np.array(single_feature)[:]
     return feature_list
 
@@ -585,12 +594,84 @@ def construct_parsing_data_list(sentences, words, pos, filter, sparse, order, fe
 
 
 @memoize
+def m0_constituent_index(sentence_length, multiroot):
+    counter_id = 0
+    basic_span = []
+    id_2_span = {}
+    for grand_idx in range(sentence_length):
+        for left_idx in range(sentence_length):
+            for right_idx in range(left_idx, sentence_length):
+                for dir in range(2):
+                    if grand_idx < left_idx or grand_idx > right_idx or (
+                                        grand_idx == left_idx and left_idx == 0 and dir == 1):
+                        id_2_span[counter_id] = (grand_idx, left_idx, right_idx, dir)
+                        counter_id += 1
+
+    span_2_id = {s: id for id, s in id_2_span.items()}
+    basic_span.append(span_2_id.get((0, 0, 0, 1)))
+    for i in range(sentence_length):
+        for j in range(sentence_length):
+            if j != 0 and i != j:
+                id = span_2_id.get((i, j, j, 0))
+                basic_span.append(id)
+                id = span_2_id.get((i, j, j, 1))
+                basic_span.append(id)
+
+    ijkss = []
+    jimcs = [[] for _ in range(counter_id)]
+    kmjcs = [[] for _ in range(counter_id)]
+    jimis = [[] for _ in range(counter_id)]
+    kmjis = [[] for _ in range(counter_id)]
+    kimcs = [[] for _ in range(counter_id)]
+    imjcs = [[] for _ in range(counter_id)]
+    kimis = [[] for _ in range(counter_id)]
+    imjis = [[] for _ in range(counter_id)]
+
+    for l in range(1, sentence_length):
+        for i in range(sentence_length - l):
+            j = i + l
+            for k in range(sentence_length):
+                for dir in range(2):
+                    if k < i or k > j or (k == i and i == 0 and dir == 1):
+                        ids = span_2_id[(k, i, j, dir)]
+                        for m in range(i, j + 1):
+                            if dir == 0:
+                                if m < j:
+                                    # one complete spans,one incomplete span form a complete span
+                                    idlc = span_2_id[(j, i, m, dir)]
+                                    jimcs[ids].append(idlc)
+                                    idri = span_2_id[(k, m, j, dir)]
+                                    kmjcs[ids].append(idri)
+                                    # two complete spans to form an incomplete span
+                                    idlc = span_2_id[(j, i, m, dir + 1)]
+                                    jimis[ids].append(idlc)
+                                    idrc = span_2_id[(k, m + 1, j, dir)]
+                                    kmjis[ids].append(idrc)
+                            else:
+                                if m > i:
+                                    # one complete span and one incomplete span to form a complete span
+                                    idli = span_2_id[(k, i, m, dir)]
+                                    kimcs[ids].append(idli)
+                                    idrc = span_2_id[(i, m, j, dir)]
+                                    imjcs[ids].append(idrc)
+                                if m < j:
+                                    # two complete spans to form an incomplete span
+                                    idlc = span_2_id[(k, i, m, dir)]
+                                    kimis[ids].append(idlc)
+                                    idrc = span_2_id[(i, m + 1, j, dir - 1)]
+                                    imjis[ids].append(idrc)
+
+                            ijkss.append(ids)
+    return span_2_id, id_2_span, ijkss, jimcs, kmjcs, jimis, kmjis, \
+           kimcs, imjcs, kimis, imjis, basic_span
+
+
+@memoize
 def m1_constituent_index(sentence_length, multiroot):
     counter_id = 0
     basic_span = []
     id_2_span = {}
     id_2_sib = {}
-    view_spans = []
     for grand_idx in range(sentence_length):
         for left_idx in range(sentence_length):
             for right_idx in range(left_idx, sentence_length):
@@ -688,7 +769,6 @@ def m1_constituent_index(sentence_length, multiroot):
                                     imjics[ids].append(idrc)
 
                         ijkss.append(ids)
-                        view_spans.append((k, i, j, dir))
 
     return span_2_id, id_2_span, ijkss, jimcs, kmjcs, jimis, kmjis, jimics, kmjics, kimsib, kmjsib, \
            kimcs, imjcs, kimis, imjis, kimics, imjics, basic_span, id_2_sib

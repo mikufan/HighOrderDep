@@ -47,6 +47,7 @@ if __name__ == '__main__':
 
     parser.add_option("--gpu", type="int", dest="gpu", default=-1, help='gpu id, set to -1 if use cpu mode')
     parser.add_option("--sparse_feature", action="store_true", default=False)
+    parser.add_option("--combine_score", action="store_true", default=False)
 
     (options, args) = parser.parse_args()
 
@@ -65,7 +66,10 @@ if __name__ == '__main__':
         eval_data_list = utils.construct_parsing_data_list(eval_sentences, w2i, pos, options.length_filter,
                                                            options.sparse_feature, options.order, feature_type, feats)
         devpath = os.path.join(options.output, 'test_pred' + str(epoch + 1) + '_' + str(options.sample_idx))
-        eval_batch_data = utils.construct_batch_data(eval_data_list, options.batchsize)
+        if not options.imbalanced_batch:
+            eval_batch_data = utils.construct_batch_data(eval_data_list, options.batchsize)
+        else:
+            eval_batch_data = utils.construct_imbalanced_batch_data(eval_data_list,options.batchsize,options.order)
 
         for batch_id, one_batch in tqdm(enumerate(eval_batch_data), mininterval=2,
                                         desc=' -Tot it %d (epoch %d)' % (len(eval_batch_data), 0), leave=False,
@@ -90,6 +94,8 @@ if __name__ == '__main__':
                 del dep_model.hm_scores_table
             if options.order == 2:
                 del dep_model.ghm_scores_table
+                if options.combine_score:
+                    del dep_model.hm_scores_table
             if options.order == 3:
                 del dep_model.ghms_scores_table
             if options.gpu > -1 and torch.cuda.is_available():
@@ -106,12 +112,6 @@ if __name__ == '__main__':
     else:
         w2i, pos, features, sentences, feature_type = utils.read_sparse_data(options.train, False, options.order)
     print 'Data read'
-    with open(os.path.join(options.output, options.params + '_' + str(options.sample_idx)), 'w') as paramsfp:
-        if not options.sparse_feature:
-            pickle.dump((w2i, pos, options), paramsfp)
-        else:
-            pickle.dump((w2i, pos, features, options), paramsfp)
-    print 'Parameters saved'
     # torch.manual_seed(options.seed)
 
     data_list = utils.construct_parsing_data_list(sentences, w2i, pos, options.length_filter, options.sparse_feature,
@@ -119,7 +119,7 @@ if __name__ == '__main__':
 
     # batch_data = utils.construct_update_batch_data(data_list, options.batchsize)
     if options.imbalanced_batch:
-        batch_data = utils.construct_imbalanced_batch_data(data_list, options.batchsize)
+        batch_data = utils.construct_imbalanced_batch_data(data_list, options.batchsize,options.order)
     else:
         batch_data = utils.construct_batch_data(data_list, options.batchsize)
     print 'Batch data constructed'
@@ -162,6 +162,8 @@ if __name__ == '__main__':
                 del high_order_dep_model.hm_scores_table
             if options.order == 2:
                 del high_order_dep_model.ghm_scores_table
+                if options.combine_score:
+                    del high_order_dep_model.hm_scores_table
             if options.order == 3:
                 del high_order_dep_model.ghms_scores_table
             if options.gpu > -1 and torch.cuda.is_available():

@@ -224,12 +224,12 @@ def construct_batch_data(data_list, batch_size):
     return batch_data
 
 
-def construct_imbalanced_batch_data(data_list, batch_size):
+def construct_imbalanced_batch_data(data_list, batch_size, order):
     data_list.sort(key=lambda x: len(x[0]))
     grouped = [list(g) for k, g in groupby(data_list, lambda s: len(s[0]))]
     batch_data = []
     for group in grouped:
-        sub_batch_data = get_imbalanced_batch_data(group, batch_size)
+        sub_batch_data = get_imbalanced_batch_data(group, batch_size, order)
         batch_data.extend(sub_batch_data)
     return batch_data
 
@@ -248,18 +248,22 @@ def get_batch_data(grouped_data, batch_size):
     return batch_data
 
 
-def get_imbalanced_batch_data(grouped_data, batch_size):
+def get_imbalanced_batch_data(grouped_data, batch_size, order):
     batch_data = []
     sample = grouped_data[0][0]
     actual_batch_size = batch_size
-    if 25 <= len(sample) < 30 and batch_size > 200:
-        actual_batch_size = 200
-    if 30 <= len(sample) < 35 and batch_size > 150:
-        actual_batch_size = 150
-    if 35 <= len(sample) < 38 and batch_size > 100:
-        actual_batch_size = 100
-    if len(sample) >= 38 and batch_size > 80:
-        actual_batch_size = 80
+    if order == 3:
+        if 25 <= len(sample) < 30 and batch_size > 200:
+            actual_batch_size = 200
+        if 30 <= len(sample) < 35 and batch_size > 150:
+            actual_batch_size = 150
+        if 35 <= len(sample) < 38 and batch_size > 100:
+            actual_batch_size = 100
+        if len(sample) >= 38 and batch_size > 80:
+            actual_batch_size = 80
+    if order == 2:
+        if len(sample) >= 38 and batch_size > 500:
+            actual_batch_size = 500
     len_datas = len(grouped_data)
     num_batch = len_datas // actual_batch_size
     if not len_datas % actual_batch_size == 0:
@@ -293,6 +297,8 @@ def read_sparse_data(conll_path, isPredict, order):
                 sentences.append(ds)
                 update_features(featureSet, ds, featureType, order)
                 s_counter += 1
+                if order > 1:
+                    print 'Finish updating features in sentence ' + str(s_counter)
         wordsCount['<UNKNOWN>'] = 0
         posCount['<UNKNOWN-POS>'] = 0
         featureSet.add('<UNKNOWN-FEATS>')
@@ -590,6 +596,9 @@ def construct_parsing_data_list(sentences, words, pos, filter, sparse, order, fe
             s_data_list.append(s_feats)
         data_list.append(s_data_list)
         sen_idx += 1
+        if order > 1 and sparse:
+            print "Finish constructing features in sentence " + str(sen_idx)
+
     return data_list
 
 

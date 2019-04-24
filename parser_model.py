@@ -30,6 +30,7 @@ class dep_model(nn.Module):
         self.order = options.order
         self.learning_rate = options.learning_rate
         self.sparse_feature = options.sparse_feature
+        self.combine_score = options.combine_score
 
         if not self.sparse_feature:
             self.lstm = nn.LSTM(self.embedding_dim + self.pdim, self.hidden_dim, self.n_layer, bidirectional=True,
@@ -86,7 +87,7 @@ class dep_model(nn.Module):
     # scoring for first order feature based model
     def evaluate_1st_sparse(self, batch_feats):
         batch_size, sentence_length, _, feature_length = batch_feats.shape
-        batch_scores = torch.index_select(self.feats_param, dim=0, index=batch_feats.view(-1))
+        batch_scores = torch.index_select(self.feats_param, dim=0, index=batch_feats.contiguous().view(-1))
         batch_scores = batch_scores.view(batch_size, sentence_length, sentence_length, feature_length)
         batch_scores = torch.sum(batch_scores, dim=3)
         self.hm_scores_table = batch_scores.permute(0, 2, 1)
@@ -94,6 +95,7 @@ class dep_model(nn.Module):
         return
 
     def evaluate_m0(self, hidden_out):
+        batch_size, sentence_length, _ = hidden_out.shape
         head_score = self.hidden2head(hidden_out)
         head_score = self.feature_transform(head_score, 1, 2)
         modifier_score = self.hidden2modifier(hidden_out)
@@ -102,6 +104,11 @@ class dep_model(nn.Module):
         grand_score = self.feature_transform(grand_score, 0, 2)
         self.ghm_scores_table = head_score + modifier_score + grand_score
         self.ghm_scores_table = self.feature_out(torch.tanh(self.ghm_scores_table))
+        if self.combine_score:
+            self.evaluate_1st(hidden_out)
+            self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length) \
+                                    + self.hm_scores_table.view(batch_size, sentence_length, sentence_length, 1)
+        self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length * sentence_length * sentence_length)
         return
 
     def evaluate_m0_sparse(self, batch_feats):
@@ -109,7 +116,13 @@ class dep_model(nn.Module):
         batch_scores = torch.index_select(self.feats_param, dim=0, index=batch_feats.view(-1))
         batch_scores = batch_scores.view(batch_size, sentence_length, sentence_length, sentence_length, feature_length)
         batch_scores = torch.sum(batch_scores, dim=4)
-        self.ghm_scores_table = batch_scores
+        self.ghm_scores_table = batch_scores.permute(0, 3, 2, 1)
+        if self.combine_score:
+            batch_feats_1st = batch_feats[:, :, 0, :, 0:(batch_feats.shape[4] - 1)]
+            self.evaluate_1st_sparse(batch_feats_1st)
+            self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length) \
+                                    + self.hm_scores_table.view(batch_size, sentence_length, sentence_length, 1)
+        self.ghm_scores_table = self.ghm_scores_table.contiguous().view(batch_size, sentence_length * sentence_length * sentence_length)
         return
 
     def evaluate_m1(self, hidden_out):
@@ -259,7 +272,11 @@ class dep_model(nn.Module):
             return loss
 
         if self.order == 2:
+            print '\n The sentence length in this batch is ' + str(sentence_length)
+            start = time.clock()
             self.evaluate_m0(hidden_out)
+            end = time.clock()
+            print 'Time cost in evaluating scores: ' + str(end - start)
             if self.training:
                 if self.gpu == -1:
                     self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float)
@@ -279,9 +296,10 @@ class dep_model(nn.Module):
             else:
                 g_heads_grand = None
                 self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length)
-                # start = time.clock()
+            start = time.clock()
             heads, heads_grand = EL_M0.batch_parse(self.ghm_scores_table.cpu())
-
+            end = time.clock()
+            print 'Time cost in parsing: ' + str(end - start)
             if not self.training:
                 for i in range(batch_size):
                     sen_idx = batch_sen[i]
@@ -360,6 +378,8 @@ class dep_model(nn.Module):
 
     # Sparse feature version of forward function
     def forward_sparse(self, batch_parent, batch_feats, batch_sen):
+        if self.gpu > -1 and torch.cuda.is_available():
+            batch_feats = batch_feats.cuda()
         if self.order == 1:
             batch_size, sentence_length, _, _ = batch_feats.size()
             self.evaluate_1st_sparse(batch_feats)
@@ -382,14 +402,15 @@ class dep_model(nn.Module):
             else:
                 g_heads = None
                 self.hm_scores_table = self.hm_scores_table.view(batch_size, sentence_length, sentence_length)
-
             heads = EL.batch_parse(self.hm_scores_table.permute(0, 2, 1).cpu())
-
             if not self.training:
                 for i in range(batch_size):
                     sen_idx = batch_sen[i]
                     self.parse_results[sen_idx] = heads[i]
                 return
+            if self.gpu > -1 and torch.cuda.is_available():
+                heads = heads.cuda()
+                g_heads = g_heads.cuda()
             heads[:, 0] = 0
             g_heads[:, 0] = 0
             predicted_hm = torch.gather(self.hm_scores_table, 2, heads.view(batch_size, sentence_length, 1))
@@ -400,6 +421,7 @@ class dep_model(nn.Module):
 
         if self.order == 2:
             batch_size, sentence_length, _, _, _ = batch_feats.size()
+            print '\n The sentence length in this batch is ' + str(sentence_length)
             self.evaluate_m0_sparse(batch_feats)
             if self.training:
                 if self.gpu == -1:
@@ -407,7 +429,7 @@ class dep_model(nn.Module):
                 else:
                     self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float).cuda()
                 g_heads_grand, g_heads = self.check_gold_m0(batch_parent)
-
+                self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length)
                 # Remove margin for golden parse
                 for s in range(batch_size):
                     for i in range(sentence_length):
@@ -419,12 +441,19 @@ class dep_model(nn.Module):
                                                                             - torch.ones((1), dtype=torch.float).cuda()
             else:
                 g_heads_grand = None
+                self.ghm_scores_table = self.ghm_scores_table.view(batch_size, sentence_length, sentence_length, sentence_length)
+            start = time.clock()
             heads, heads_grand = EL_M0.batch_parse(self.ghm_scores_table.cpu())
+            end = time.clock()
+            print 'Time cost in parsing: ' + str(end - start)
             if not self.training:
                 for i in range(batch_size):
                     sen_idx = batch_sen[i]
                     self.parse_results[sen_idx] = heads[i]
                 return
+            if self.gpu > -1 and torch.cuda.is_available():
+                heads_grand = heads_grand.cuda()
+                g_heads_grand = g_heads_grand.cuda()
 
             predicted_ghm = torch.gather(self.ghm_scores_table.contiguous().view(batch_size, sentence_length, sentence_length * sentence_length), 2,
                                          heads_grand.view(batch_size, sentence_length, 1))

@@ -17,6 +17,10 @@ def batch_parse(batch_scores):
     # span index table, to avoid redundant iterations
     span_2_id, id_2_span, ijkss, jimcs, kmjcs, jimis, kmjis, kimcs, imjcs, kimis, imjis, basic_span = utils.m0_constituent_index(sentence_length, False)
     # initial basic complete spans
+    #if gpu>-1 and torch.cuda.is_available():
+        #complete_table = complete_table.cuda()
+        #incomplete_table = incomplete_table.cuda()
+
     for ijj in basic_span:
         complete_table[:, ijj] = 0.0
 

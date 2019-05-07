@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_option("--wembedding", type="int", dest="wembedding_dim", default=100)
     parser.add_option("--pembedding", type="int", dest="pembedding_dim", default=25)
     parser.add_option("--hidden", type="int", dest="hidden_dim", default=100)
-    parser.add_option("--nLayer", type="int", dest="n_layer", default=1)
+    parser.add_option("--nlayer", type="int", dest="n_layer", default=1)
     parser.add_option("--params", dest="params", help="Parameters file", metavar="FILE", default="params.pickle")
 
     parser.add_option("--optim", type="string", dest="optim", default='adam')

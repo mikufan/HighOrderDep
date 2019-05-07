@@ -262,8 +262,12 @@ def get_imbalanced_batch_data(grouped_data, batch_size, order):
         if len(sample) >= 38 and batch_size > 80:
             actual_batch_size = 80
     if order == 2:
-        if len(sample) >= 38 and batch_size > 500:
+        if len(sample) >=25 and batch_size> 500:
             actual_batch_size = 500
+        if len(sample) >= 32 and batch_size > 300:
+            actual_batch_size = 300
+        if len(sample) >= 38 and batch_size > 100:
+            actual_batch_size = 100
     len_datas = len(grouped_data)
     num_batch = len_datas // actual_batch_size
     if not len_datas % actual_batch_size == 0:

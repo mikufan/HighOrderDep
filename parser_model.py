@@ -422,7 +422,10 @@ class dep_model(nn.Module):
         if self.order == 2:
             batch_size, sentence_length, _, _, _ = batch_feats.size()
             print '\n The sentence length in this batch is ' + str(sentence_length)
+            start = time.clock()
             self.evaluate_m0_sparse(batch_feats)
+            end = time.clock()
+            print 'Time cost in evaluating scores ' + str(end - start)
             if self.training:
                 if self.gpu == -1:
                     self.ghm_scores_table = self.ghm_scores_table + torch.ones((batch_size, 1), dtype=torch.float)

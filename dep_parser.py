@@ -48,6 +48,8 @@ if __name__ == '__main__':
     parser.add_option("--gpu", type="int", dest="gpu", default=-1, help='gpu id, set to -1 if use cpu mode')
     parser.add_option("--sparse_feature", action="store_true", default=False)
     parser.add_option("--combine_score", action="store_true", default=False)
+    parser.add_option("--test_batch_size", type="int", default=1000, help='batch size used in test')
+    parser.add_option("--embedding_only", action="store_true", default=False)
 
     (options, args) = parser.parse_args()
 
@@ -67,9 +69,9 @@ if __name__ == '__main__':
                                                            options.sparse_feature, options.order, feature_type, feats)
         devpath = os.path.join(options.output, 'test_pred' + str(epoch + 1) + '_' + str(options.sample_idx))
         if not options.imbalanced_batch:
-            eval_batch_data = utils.construct_batch_data(eval_data_list, options.batchsize)
+            eval_batch_data = utils.construct_batch_data(eval_data_list, options.test_batch_size)
         else:
-            eval_batch_data = utils.construct_imbalanced_batch_data(eval_data_list,options.batchsize,options.order)
+            eval_batch_data = utils.construct_imbalanced_batch_data(eval_data_list, options.test_batch_size, options.order)
 
         for batch_id, one_batch in tqdm(enumerate(eval_batch_data), mininterval=2,
                                         desc=' -Tot it %d (epoch %d)' % (len(eval_batch_data), 0), leave=False,
@@ -119,7 +121,7 @@ if __name__ == '__main__':
 
     # batch_data = utils.construct_update_batch_data(data_list, options.batchsize)
     if options.imbalanced_batch:
-        batch_data = utils.construct_imbalanced_batch_data(data_list, options.batchsize,options.order)
+        batch_data = utils.construct_imbalanced_batch_data(data_list, options.batchsize, options.order)
     else:
         batch_data = utils.construct_batch_data(data_list, options.batchsize)
     print 'Batch data constructed'

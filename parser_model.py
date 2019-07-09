@@ -31,6 +31,7 @@ class dep_model(nn.Module):
         self.learning_rate = options.learning_rate
         self.sparse_feature = options.sparse_feature
         self.combine_score = options.combine_score
+        self.embedding_only = options.embedding_only
 
         if not self.sparse_feature:
             self.lstm = nn.LSTM(self.embedding_dim + self.pdim, self.hidden_dim, self.n_layer, bidirectional=True,
@@ -52,6 +53,9 @@ class dep_model(nn.Module):
         else:
             self.feats_param = nn.Parameter(torch.FloatTensor(len(self.feats)))
             self.feats_param.data = torch.zeros(len(self.feats))
+
+        if self.embedding_only:
+            self.embed2hidden = nn.Linear(self.embedding_dim + self.pdim, 2*self.hidden_dim)
 
         self.trainer = self.get_optim(self.parameters())
         self.parse_results = {}
@@ -231,7 +235,11 @@ class dep_model(nn.Module):
         p_embeds = self.plookup(batch_pos)
         # w_embeds = self.dropout1(w_embeds)
         batch_input = torch.cat((w_embeds, p_embeds), 2)
-        hidden_out, _ = self.lstm(batch_input)
+        if not self.embedding_only:
+            hidden_out, _ = self.lstm(batch_input)
+        else:
+            hidden_out = self.embed2hidden(batch_input)
+
         if self.order == 1:
             self.evaluate_1st(hidden_out)
             if self.training:
